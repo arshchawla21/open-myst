@@ -1,4 +1,4 @@
-import type { AppSettings, ProjectMeta, Result } from './types';
+import type { AppSettings, ChatMessage, ProjectMeta, Result } from './types';
 
 export interface MystApi {
   settings: {
@@ -18,5 +18,12 @@ export interface MystApi {
   document: {
     read: () => Promise<string>;
     write: (content: string) => Promise<void>;
+  };
+  chat: {
+    send: (message: string) => Promise<ChatMessage>;
+    history: () => Promise<ChatMessage[]>;
+    clear: () => Promise<void>;
+    onChunk: (callback: (chunk: string) => void) => () => void;
+    onChunkDone: (callback: () => void) => () => void;
   };
 }

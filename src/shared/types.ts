@@ -19,3 +19,18 @@ export interface ProjectSummary {
 export type Result<T, E = string> = { ok: true; value: T } | { ok: false; error: E };
 
 export const DEFAULT_MODEL = 'google/gemma-3-27b-it';
+
+export type ChatRole = 'user' | 'assistant';
+
+export interface ChatMessage {
+  id: string;
+  role: ChatRole;
+  content: string;
+  timestamp: string;
+}
+
+export interface Heading {
+  level: number;
+  text: string;
+  pos: number;
+}

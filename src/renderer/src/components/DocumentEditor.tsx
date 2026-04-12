@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Editor, rootCtx, defaultValueCtx } from '@milkdown/kit/core';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Editor, rootCtx, defaultValueCtx, editorViewCtx } from '@milkdown/kit/core';
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { history } from '@milkdown/kit/plugin/history';
@@ -7,9 +7,12 @@ import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
 import { clipboard } from '@milkdown/kit/plugin/clipboard';
 import { cursor } from '@milkdown/kit/plugin/cursor';
 import { trailing } from '@milkdown/kit/plugin/trailing';
-import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
+import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
+import type { Node as PmNode } from '@milkdown/kit/prose/model';
 import { bridge } from '../api/bridge';
 import { EditorToolbar } from './EditorToolbar';
+import { useHeadings } from '../store/headings';
+import type { Heading } from '@shared/types';
 
 const FONT_SIZE_STORAGE_KEY = 'myst:font-size';
 const DEFAULT_FONT_SIZE = 18;
@@ -56,6 +59,62 @@ function EditorView({ initialValue, onChange }: EditorViewProps): JSX.Element {
   );
 
   return <Milkdown />;
+}
+
+function extractHeadings(doc: PmNode): Heading[] {
+  const result: Heading[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name === 'heading') {
+      result.push({ level: node.attrs['level'] as number, text: node.textContent, pos });
+    }
+  });
+  return result;
+}
+
+function HeadingsExtractor(): null {
+  const [loading, getEditor] = useInstance();
+  const { setHeadings, scrollToPos, clearScroll } = useHeadings();
+  const prevJson = useRef('');
+
+  const sync = useCallback(() => {
+    if (loading) return;
+    const editor = getEditor();
+    if (!editor) return;
+    try {
+      const view = editor.ctx.get(editorViewCtx);
+      const headings = extractHeadings(view.state.doc);
+      const json = JSON.stringify(headings);
+      if (json !== prevJson.current) {
+        prevJson.current = json;
+        setHeadings(headings);
+      }
+    } catch {
+      // editor not ready
+    }
+  }, [loading, getEditor, setHeadings]);
+
+  useEffect(() => {
+    sync();
+    const id = setInterval(sync, 800);
+    return () => clearInterval(id);
+  }, [sync]);
+
+  useEffect(() => {
+    if (scrollToPos === null || loading) return;
+    const editor = getEditor();
+    if (!editor) return;
+    try {
+      const view = editor.ctx.get(editorViewCtx);
+      const dom = view.domAtPos(scrollToPos);
+      const el = dom.node instanceof HTMLElement ? dom.node : dom.node.parentElement;
+      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      clearScroll();
+    } catch {
+      clearScroll();
+    }
+  }, [scrollToPos, loading, getEditor, clearScroll]);
+
+  return null;
 }
 
 interface DocumentEditorProps {
@@ -138,6 +197,7 @@ export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Elemen
     <div className="document-editor" style={surfaceStyle}>
       <MilkdownProvider>
         <EditorToolbar fontSize={fontSize} onFontSize={setFontSize} />
+        <HeadingsExtractor />
         <div className="document-scroll">
           <div className="document-page">
             <EditorView

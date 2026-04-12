@@ -2,6 +2,7 @@ import { useApp } from '../store/app';
 import { SourcesPanel } from './SourcesPanel';
 import { DocumentPanel } from './DocumentPanel';
 import { ChatPanel } from './ChatPanel';
+import { TableOfContents } from './TableOfContents';
 
 export function Layout(): JSX.Element {
   const { project, openSettings, closeProject } = useApp();
@@ -31,6 +32,7 @@ export function Layout(): JSX.Element {
         </section>
         <aside className="pane pane-right">
           <ChatPanel />
+          <TableOfContents />
         </aside>
       </main>
     </div>

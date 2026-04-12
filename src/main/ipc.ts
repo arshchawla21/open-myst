@@ -8,6 +8,7 @@ import {
 } from './settings';
 import { closeProject, createNewProject, getCurrentProject, openProject } from './projects';
 import { readDocument, writeDocument } from './document';
+import { clearHistory, loadHistory, sendMessage } from './chat';
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannels.Settings.Get, () => getSettings());
@@ -51,4 +52,13 @@ export function registerIpcHandlers(): void {
     }
     await writeDocument(content);
   });
+
+  ipcMain.handle(IpcChannels.Chat.Send, async (_event, message: unknown) => {
+    if (typeof message !== 'string' || message.trim().length === 0) {
+      throw new Error('Message must be a non-empty string.');
+    }
+    return sendMessage(message.trim());
+  });
+  ipcMain.handle(IpcChannels.Chat.History, () => loadHistory());
+  ipcMain.handle(IpcChannels.Chat.Clear, () => clearHistory());
 }

@@ -21,6 +21,29 @@ const api: MystApi = {
     read: () => ipcRenderer.invoke(IpcChannels.Document.Read),
     write: (content) => ipcRenderer.invoke(IpcChannels.Document.Write, content),
   },
+  chat: {
+    send: (message) => ipcRenderer.invoke(IpcChannels.Chat.Send, message),
+    history: () => ipcRenderer.invoke(IpcChannels.Chat.History),
+    clear: () => ipcRenderer.invoke(IpcChannels.Chat.Clear),
+    onChunk: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, chunk: string): void => {
+        callback(chunk);
+      };
+      ipcRenderer.on(IpcChannels.Chat.Chunk, handler);
+      return () => {
+        ipcRenderer.removeListener(IpcChannels.Chat.Chunk, handler);
+      };
+    },
+    onChunkDone: (callback) => {
+      const handler = (): void => {
+        callback();
+      };
+      ipcRenderer.on(IpcChannels.Chat.ChunkDone, handler);
+      return () => {
+        ipcRenderer.removeListener(IpcChannels.Chat.ChunkDone, handler);
+      };
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld('myst', api);
