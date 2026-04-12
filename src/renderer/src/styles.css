@@ -388,7 +388,7 @@ h3 {
   font-family: var(--font-serif);
   color: var(--doc-fg);
   font-size: var(--doc-font-size, 18px);
-  line-height: 1.75;
+  line-height: 1.25;
   font-feature-settings: 'kern', 'liga', 'calt';
   -webkit-font-smoothing: antialiased;
 }
@@ -435,10 +435,7 @@ h3 {
 
 /* Paragraphs */
 .milkdown p {
-  margin: 0 0 1em;
-}
-.milkdown p:last-child {
-  margin-bottom: 0;
+  margin: 0;
 }
 
 /* Inline */
