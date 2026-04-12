@@ -17,7 +17,7 @@ The core loop is **write → mark up → refine**, moved inside the app so the u
 |---|---|---|
 | Shell | Electron | Cross-platform desktop, local filesystem access for projects/sources, easy packaging. |
 | Renderer | React + TypeScript + Vite | Standard, fast HMR, typed. |
-| Editor | CodeMirror 6 with a markdown rendering layer (or Milkdown / Tiptap if WYSIWYG is preferred) | CM6 gives low-level control over decorations, inline widgets, and word-based anchoring — critical for inline commenting. Decision deferred until prototype. |
+| Editor | Milkdown (ProseMirror-based WYSIWYG markdown) | Pretty out of the box, plugin system for inline decorations and widgets, real markdown in / out. Chosen over CodeMirror 6 for the writer-friendly feel. Inline-comment anchoring will use Milkdown/ProseMirror plugins. |
 | Markdown rendering | `remark` + `rehype` pipeline with KaTeX, Shiki for code | Pretty output without locking into a heavyweight editor. |
 | Diff view | `diff` + custom CM6 decorations, or `react-diff-viewer-continued` | Needed for edit-request accept/reject flow. |
 | State | Zustand or Redux Toolkit | Session state for comments, chat, diffs. |
@@ -216,7 +216,7 @@ The document stays immutable until Accept — edits are layered on top as pendin
 
 ## 14. Open questions
 
-- **Editor choice:** CodeMirror 6 (pure markdown, full decoration control) vs. Tiptap / Milkdown (WYSIWYG). CM6 is safer for precise anchoring; WYSIWYG is nicer for non-technical writers. Needs a prototype.
+- ~~**Editor choice:**~~ Locked in: **Milkdown**. Anchoring will be a custom ProseMirror plugin during Phase 4.
 - **Default model:** Gemma 3 27B vs. Gemini 2.5 Flash vs. something else on OpenRouter. Quality/cost pass before Phase 2.
 - **Monetization:** own-key (user supplies OpenRouter key) vs. hosted (we pay, charge subscription). Deferred — ship own-key first.
 - **Collaboration / multi-user:** out of scope for v1. Projects are single-user local folders.

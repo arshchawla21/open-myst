@@ -25,7 +25,7 @@ The MVP is: a user can open a project, drop sources, write a markdown document, 
 
 | # | Feature | Phase | Status | Notes |
 |---|---|---|---|---|
-| D1 | Markdown editor in center pane | 1 | planned | CodeMirror 6 (decision deferred vs. Tiptap). |
+| D1 | Markdown editor in center pane | 1 | planned | **Milkdown** (ProseMirror-based WYSIWYG). |
 | D2 | Beautiful markdown rendering | 1 | planned | remark/rehype + KaTeX + Shiki. |
 | D3 | Autosave to `document.md` | 1 | planned | Debounced. |
 | D4 | Plain editor mode (Mode A) | 1 | planned | No AI interaction on document. |
@@ -115,7 +115,7 @@ The MVP is: a user can open a project, drop sources, write a markdown document, 
 
 | Decision | Options | Status |
 |---|---|---|
-| Editor engine | CodeMirror 6 vs. Tiptap vs. Milkdown | open — prototype needed |
+| Editor engine | ~~CM6 vs Tiptap vs Milkdown~~ | **locked: Milkdown** (2026-04-12) |
 | Default model | Gemma 3 27B vs. Gemini 2.5 Flash vs. other | open — quality/cost pass |
 | Monetization | own-key vs. hosted subscription | deferred — ship own-key first |
 | Web delivery | Electron only vs. also a hosted web build | deferred — Phase 7 |
@@ -124,4 +124,5 @@ The MVP is: a user can open a project, drop sources, write a markdown document, 
 
 > Append-only notes per working session. Date · what changed · what's next.
 
-- **2026-04-12** · Initial `plan.md` and `features.md` written from the Review Mode proposal plus the expanded desktop-app direction (project folders, sources wiki, inline commenting as primary mode, Review Mode deferred post-MVP). Next: scaffold Phase 0 (Electron + Vite + React + TS) and decide editor engine with a small prototype.
+- **2026-04-12** · Initial `plan.md` and `features.md` written from the Review Mode proposal plus the expanded desktop-app direction (project folders, sources wiki, inline commenting as primary mode, Review Mode deferred post-MVP). Editor engine locked to Milkdown.
+- **2026-04-12** · Phase 0 skeleton landed. Electron + Vite + React + TS via `electron-vite`, strict TS, ESLint + Prettier, CSP-locked renderer, context-isolated preload with typed `contextBridge` (`window.myst`), Zustand store. Main process has `safeStorage`-backed settings for the OpenRouter key, default model persistence, and new/open project flows that scaffold the on-disk project layout (`project.json`, `agent.md`, `document.md`, `sources/index.md`, `comments.json`, `chat.jsonl`, `.myst/diffs/`). Renderer has welcome screen, three-pane layout with placeholders for each phase, and a settings modal that round-trips the API key and default model. `npm run build` + `npm run lint` + `npm run typecheck` all green. Next: Phase 1 — wire Milkdown into the document pane and persist to `document.md`.
