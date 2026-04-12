@@ -187,8 +187,8 @@ export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Elemen
     if (scrollToPos === null || !editor) return;
     try {
       const view = editor.view;
-      const dom = view.domAtPos(scrollToPos);
-      const el = dom.node instanceof HTMLElement ? dom.node : dom.node.parentElement;
+      const node = view.nodeDOM(scrollToPos);
+      const el = node instanceof HTMLElement ? node : null;
       el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch {
       // position may be stale
