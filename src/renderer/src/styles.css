@@ -390,29 +390,27 @@ h3 {
   opacity: 0.5;
 }
 
-/* Milkdown / ProseMirror content surface */
-.milkdown {
+/* Tiptap / ProseMirror content surface */
+.tiptap {
   font-family: var(--font-serif);
   color: var(--doc-fg);
   font-size: var(--doc-font-size, 18px);
   line-height: 1.25;
   font-feature-settings: 'kern', 'liga', 'calt';
   -webkit-font-smoothing: antialiased;
-}
-.milkdown .ProseMirror {
   outline: none;
   min-height: 50vh;
   caret-color: var(--doc-accent);
 }
-.milkdown .ProseMirror:focus {
+.tiptap:focus {
   outline: none;
 }
 
-/* Headings: weightier, tighter, still serif */
-.milkdown h1,
-.milkdown h2,
-.milkdown h3,
-.milkdown h4 {
+/* Headings */
+.tiptap h1,
+.tiptap h2,
+.tiptap h3,
+.tiptap h4 {
   font-family: var(--font-serif);
   color: var(--doc-fg);
   font-weight: 600;
@@ -420,20 +418,20 @@ h3 {
   letter-spacing: -0.01em;
   text-transform: none;
 }
-.milkdown h1 {
+.tiptap h1 {
   font-size: 2.1em;
   margin: 1.2em 0 0.5em;
 }
-.milkdown h2 {
+.tiptap h2 {
   font-size: 1.55em;
   margin: 1.8em 0 0.4em;
 }
-.milkdown h3 {
+.tiptap h3 {
   font-size: 1.2em;
   margin: 1.6em 0 0.3em;
   color: var(--doc-fg-soft);
 }
-.milkdown h4 {
+.tiptap h4 {
   font-size: 1em;
   margin: 1.4em 0 0.3em;
   text-transform: uppercase;
@@ -442,27 +440,27 @@ h3 {
 }
 
 /* Paragraphs */
-.milkdown p {
+.tiptap p {
   margin: 0;
 }
 
 /* Inline */
-.milkdown strong {
+.tiptap strong {
   font-weight: 600;
   color: var(--doc-fg);
 }
-.milkdown em {
+.tiptap em {
   font-style: italic;
 }
-.milkdown a {
+.tiptap a {
   color: var(--doc-accent);
   text-decoration: none;
   border-bottom: 1px solid rgba(156, 180, 255, 0.4);
 }
-.milkdown a:hover {
+.tiptap a:hover {
   border-bottom-color: var(--doc-accent);
 }
-.milkdown code {
+.tiptap code {
   font-family: var(--font-mono);
   font-size: 0.88em;
   background: var(--doc-code-bg);
@@ -471,45 +469,53 @@ h3 {
   color: #e5c7a7;
 }
 
-/* Blockquote: a subtle indentation, italic, lighter color */
-.milkdown blockquote {
+/* Blockquote */
+.tiptap blockquote {
   margin: 1.4em 0;
   padding: 0 0 0 1.2em;
   border-left: 2px solid var(--doc-accent);
   color: var(--doc-quote);
   font-style: italic;
 }
-.milkdown blockquote p {
+.tiptap blockquote p {
   margin: 0.4em 0;
 }
 
 /* Lists */
-.milkdown ul,
-.milkdown ol {
+.tiptap ul,
+.tiptap ol {
   margin: 0.6em 0 1em;
   padding-left: 1.6em;
 }
-.milkdown li {
+.tiptap li {
   margin: 0.25em 0;
 }
-.milkdown li > p {
+.tiptap li > p {
   margin: 0;
 }
-.milkdown ul li::marker {
+.tiptap ul li::marker {
   color: var(--fg-muted);
 }
-.milkdown ol li::marker {
+.tiptap ol li::marker {
   color: var(--fg-muted);
 }
 
-/* Task list checkboxes (GFM) */
-.milkdown li[data-task-list-item] {
+/* Task list checkboxes */
+.tiptap ul[data-type="taskList"] {
   list-style: none;
-  margin-left: -1.3em;
+  padding-left: 0;
+}
+.tiptap ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.tiptap ul[data-type="taskList"] li label {
+  margin-top: 3px;
 }
 
 /* Code block */
-.milkdown pre {
+.tiptap pre {
   font-family: var(--font-mono);
   font-size: 14px;
   background: var(--doc-code-bg);
@@ -521,7 +527,7 @@ h3 {
   line-height: 1.55;
   color: #dbe0ea;
 }
-.milkdown pre code {
+.tiptap pre code {
   background: transparent;
   padding: 0;
   color: inherit;
@@ -529,46 +535,52 @@ h3 {
 }
 
 /* Horizontal rule */
-.milkdown hr {
+.tiptap hr {
   border: none;
   border-top: 1px solid var(--doc-rule);
   margin: 2em auto;
   width: 40%;
 }
 
-/* Tables (GFM) */
-.milkdown table {
+/* Tables */
+.tiptap table {
   border-collapse: collapse;
   width: 100%;
   margin: 1.4em 0;
   font-size: 0.95em;
 }
-.milkdown th,
-.milkdown td {
+.tiptap th,
+.tiptap td {
   border: 1px solid var(--doc-rule);
   padding: 8px 12px;
   text-align: left;
 }
-.milkdown th {
+.tiptap th {
   background: rgba(255, 255, 255, 0.02);
   font-weight: 600;
 }
 
 /* Images */
-.milkdown img {
+.tiptap img {
   max-width: 100%;
   border-radius: 6px;
   display: block;
   margin: 1.2em auto;
 }
 
-/* Placeholder caret hint when empty doc (via trailing plugin) */
-.milkdown .ProseMirror p.is-empty::before {
+/* Placeholder */
+.tiptap p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: var(--fg-muted);
   float: left;
   height: 0;
   pointer-events: none;
+}
+
+/* Active toolbar buttons */
+.toolbar-btn-active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--doc-accent);
 }
 
 /* ---- Right pane layout (chat + ToC) ---- */

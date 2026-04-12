@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Editor, rootCtx, defaultValueCtx, editorViewCtx, parserCtx } from '@milkdown/kit/core';
-import { commonmark } from '@milkdown/kit/preset/commonmark';
-import { gfm } from '@milkdown/kit/preset/gfm';
-import { history } from '@milkdown/kit/plugin/history';
-import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
-import { clipboard } from '@milkdown/kit/plugin/clipboard';
-import { cursor } from '@milkdown/kit/plugin/cursor';
-import { trailing } from '@milkdown/kit/plugin/trailing';
-import { $prose } from '@milkdown/kit/utils';
-import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
-import type { Node as PmNode } from '@milkdown/kit/prose/model';
-import { Slice } from '@milkdown/kit/prose/model';
-import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Placeholder from '@tiptap/extension-placeholder';
+import Underline from '@tiptap/extension-underline';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import { Table } from '@tiptap/extension-table';
+import TableRow from '@tiptap/extension-table-row';
+import TableCell from '@tiptap/extension-table-cell';
+import TableHeader from '@tiptap/extension-table-header';
+import Link from '@tiptap/extension-link';
+import Image from '@tiptap/extension-image';
+import { Markdown } from 'tiptap-markdown';
 import { bridge } from '../api/bridge';
 import { EditorToolbar } from './EditorToolbar';
 import { useHeadings } from '../store/headings';
 import type { Heading } from '@shared/types';
+import type { Editor } from '@tiptap/core';
 
 const FONT_SIZE_STORAGE_KEY = 'myst:font-size';
 const DEFAULT_FONT_SIZE = 18;
@@ -27,71 +28,13 @@ function loadFontSize(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FONT_SIZE;
 }
 
-const markdownPaste = $prose((ctx) => {
-  return new Plugin({
-    key: new PluginKey('myst-markdown-paste'),
-    props: {
-      handlePaste(view, event) {
-        const html = event.clipboardData?.getData('text/html');
-        if (html) return false;
-
-        const text = event.clipboardData?.getData('text/plain');
-        if (!text) return false;
-
-        const parser = ctx.get(parserCtx);
-        const doc = parser(text);
-        if (!doc || doc.content.size === 0) return false;
-
-        const { tr } = view.state;
-        tr.replaceSelection(new Slice(doc.content, 0, 0));
-        view.dispatch(tr);
-        return true;
-      },
-    },
-  });
-});
-
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 const AUTOSAVE_DELAY_MS = 500;
 
-interface EditorViewProps {
-  initialValue: string;
-  onChange: (markdown: string) => void;
-}
-
-function EditorView({ initialValue, onChange }: EditorViewProps): JSX.Element {
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
-
-  useEditor(
-    (root) =>
-      Editor.make()
-        .config((ctx) => {
-          ctx.set(rootCtx, root);
-          ctx.set(defaultValueCtx, initialValue);
-          ctx.get(listenerCtx).markdownUpdated((_, markdown, prev) => {
-            if (markdown === prev) return;
-            onChangeRef.current(markdown);
-          });
-        })
-        .use(commonmark)
-        .use(gfm)
-        .use(history)
-        .use(listener)
-        .use(clipboard)
-        .use(markdownPaste)
-        .use(cursor)
-        .use(trailing),
-    [],
-  );
-
-  return <Milkdown />;
-}
-
-function extractHeadings(doc: PmNode): Heading[] {
+function extractHeadings(editor: Editor): Heading[] {
   const result: Heading[] = [];
-  doc.descendants((node, pos) => {
+  editor.state.doc.descendants((node, pos) => {
     if (node.type.name === 'heading') {
       result.push({ level: node.attrs['level'] as number, text: node.textContent, pos });
     }
@@ -99,50 +42,50 @@ function extractHeadings(doc: PmNode): Heading[] {
   return result;
 }
 
-function HeadingsExtractor(): null {
-  const [loading, getEditor] = useInstance();
-  const { setHeadings, scrollToPos, clearScroll } = useHeadings();
-  const prevJson = useRef('');
+interface TiptapEditorProps {
+  initialValue: string;
+  onMarkdownChange: (md: string) => void;
+  onEditorReady: (editor: Editor) => void;
+}
 
-  const sync = useCallback(() => {
-    if (loading) return;
-    const editor = getEditor();
-    if (!editor) return;
-    try {
-      const view = editor.ctx.get(editorViewCtx);
-      const headings = extractHeadings(view.state.doc);
-      const json = JSON.stringify(headings);
-      if (json !== prevJson.current) {
-        prevJson.current = json;
-        setHeadings(headings);
-      }
-    } catch {
-      // editor not ready
-    }
-  }, [loading, getEditor, setHeadings]);
+function TiptapEditor({ initialValue, onMarkdownChange, onEditorReady }: TiptapEditorProps): JSX.Element {
+  const onChangeRef = useRef(onMarkdownChange);
+  onChangeRef.current = onMarkdownChange;
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3, 4] },
+      }),
+      Placeholder.configure({ placeholder: 'Start writing…' }),
+      Underline,
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Table.configure({ resizable: false }),
+      TableRow,
+      TableCell,
+      TableHeader,
+      Link.configure({ openOnClick: false }),
+      Image,
+      Markdown.configure({
+        html: false,
+        transformPastedText: true,
+        transformCopiedText: true,
+      }),
+    ],
+    content: initialValue,
+    onUpdate({ editor: ed }) {
+      const storage = ed.storage as unknown as Record<string, { getMarkdown?: () => string }>;
+      const md = storage['markdown']?.getMarkdown?.() ?? '';
+      onChangeRef.current(md);
+    },
+  });
 
   useEffect(() => {
-    sync();
-    const id = setInterval(sync, 800);
-    return () => clearInterval(id);
-  }, [sync]);
+    if (editor) onEditorReady(editor);
+  }, [editor, onEditorReady]);
 
-  useEffect(() => {
-    if (scrollToPos === null || loading) return;
-    const editor = getEditor();
-    if (!editor) return;
-    try {
-      const view = editor.ctx.get(editorViewCtx);
-      const dom = view.domAtPos(scrollToPos);
-      const el = dom.node instanceof HTMLElement ? dom.node : dom.node.parentElement;
-      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      clearScroll();
-    } catch {
-      clearScroll();
-    }
-  }, [scrollToPos, loading, getEditor, clearScroll]);
-
-  return null;
+  return <EditorContent editor={editor} className="tiptap-content" />;
 }
 
 interface DocumentEditorProps {
@@ -154,8 +97,11 @@ export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Elemen
   const [loadError, setLoadError] = useState<string | null>(null);
   const [status, setStatus] = useState<SaveStatus>('idle');
   const [fontSize, setFontSize] = useState<number>(loadFontSize);
+  const [editor, setEditor] = useState<Editor | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedRef = useRef<string>('');
+  const { setHeadings, scrollToPos, clearScroll } = useHeadings();
+  const prevHeadingsJson = useRef('');
 
   useEffect(() => {
     window.localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(fontSize));
@@ -165,6 +111,7 @@ export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Elemen
     let cancelled = false;
     setInitialValue(null);
     setLoadError(null);
+    setEditor(null);
     bridge.document
       .read()
       .then((content) => {
@@ -183,23 +130,59 @@ export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Elemen
     };
   }, [projectPath]);
 
-  const scheduleSave = (markdown: string): void => {
-    if (markdown === lastSavedRef.current) return;
-    setStatus('saving');
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      bridge.document
-        .write(markdown)
-        .then(() => {
-          lastSavedRef.current = markdown;
-          setStatus('saved');
-        })
-        .catch((err: Error) => {
-          console.error('document write failed', err);
-          setStatus('error');
-        });
-    }, AUTOSAVE_DELAY_MS);
-  };
+  const syncHeadings = useCallback(() => {
+    if (!editor) return;
+    const headings = extractHeadings(editor);
+    const json = JSON.stringify(headings);
+    if (json !== prevHeadingsJson.current) {
+      prevHeadingsJson.current = json;
+      setHeadings(headings);
+    }
+  }, [editor, setHeadings]);
+
+  useEffect(() => {
+    syncHeadings();
+    const id = setInterval(syncHeadings, 800);
+    return () => clearInterval(id);
+  }, [syncHeadings]);
+
+  useEffect(() => {
+    if (scrollToPos === null || !editor) return;
+    try {
+      const view = editor.view;
+      const dom = view.domAtPos(scrollToPos);
+      const el = dom.node instanceof HTMLElement ? dom.node : dom.node.parentElement;
+      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch {
+      // position may be stale
+    }
+    clearScroll();
+  }, [scrollToPos, editor, clearScroll]);
+
+  const scheduleSave = useCallback(
+    (markdown: string): void => {
+      if (markdown === lastSavedRef.current) return;
+      setStatus('saving');
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        bridge.document
+          .write(markdown)
+          .then(() => {
+            lastSavedRef.current = markdown;
+            setStatus('saved');
+          })
+          .catch((err: Error) => {
+            console.error('document write failed', err);
+            setStatus('error');
+          });
+      }, AUTOSAVE_DELAY_MS);
+    },
+    [],
+  );
+
+  const handleEditorReady = useCallback((ed: Editor) => {
+    setEditor(ed);
+  }, []);
 
   const surfaceStyle = { '--doc-font-size': `${fontSize}px` } as CSSProperties;
 
@@ -223,19 +206,17 @@ export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Elemen
 
   return (
     <div className="document-editor" style={surfaceStyle}>
-      <MilkdownProvider>
-        <EditorToolbar fontSize={fontSize} onFontSize={setFontSize} />
-        <HeadingsExtractor />
-        <div className="document-scroll">
-          <div className="document-page">
-            <EditorView
-              key={projectPath}
-              initialValue={initialValue}
-              onChange={scheduleSave}
-            />
-          </div>
+      <EditorToolbar editor={editor} fontSize={fontSize} onFontSize={setFontSize} />
+      <div className="document-scroll">
+        <div className="document-page">
+          <TiptapEditor
+            key={projectPath}
+            initialValue={initialValue}
+            onMarkdownChange={scheduleSave}
+            onEditorReady={handleEditorReady}
+          />
         </div>
-      </MilkdownProvider>
+      </div>
       <SaveIndicator status={status} />
     </div>
   );

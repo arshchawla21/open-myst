@@ -1,22 +1,8 @@
-import { useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { callCommand } from '@milkdown/kit/utils';
-import { useInstance } from '@milkdown/react';
-import {
-  toggleStrongCommand,
-  toggleEmphasisCommand,
-  toggleInlineCodeCommand,
-  wrapInHeadingCommand,
-  wrapInBlockquoteCommand,
-  wrapInBulletListCommand,
-  wrapInOrderedListCommand,
-  createCodeBlockCommand,
-  downgradeHeadingCommand,
-} from '@milkdown/kit/preset/commonmark';
-import { toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
-import type { CmdKey } from '@milkdown/kit/core';
+import type { Editor } from '@tiptap/core';
 
 interface EditorToolbarProps {
+  editor: Editor | null;
   fontSize: number;
   onFontSize: (size: number) => void;
 }
@@ -25,35 +11,41 @@ const MIN_SIZE = 14;
 const MAX_SIZE = 24;
 const SIZE_STEP = 1;
 
-export function EditorToolbar({ fontSize, onFontSize }: EditorToolbarProps): JSX.Element {
-  const [loading, getEditor] = useInstance();
-
-  const run = useCallback(
-    <T,>(key: CmdKey<T>, payload?: T): void => {
-      if (loading) return;
-      const editor = getEditor();
-      if (!editor) return;
-      editor.action(callCommand(key, payload));
-    },
-    [loading, getEditor],
-  );
+export function EditorToolbar({ editor, fontSize, onFontSize }: EditorToolbarProps): JSX.Element {
+  const run = (fn: (e: Editor) => void): void => {
+    if (!editor) return;
+    fn(editor);
+  };
 
   return (
     <div className="editor-toolbar" role="toolbar">
       <div className="toolbar-group">
         <ToolbarButton
           title="Paragraph"
-          onClick={() => run(downgradeHeadingCommand.key)}
+          active={editor?.isActive('paragraph') && !editor?.isActive('heading')}
+          onClick={() => run((e) => e.chain().focus().setParagraph().run())}
         >
           <span className="label">Text</span>
         </ToolbarButton>
-        <ToolbarButton title="Heading 1" onClick={() => run(wrapInHeadingCommand.key, 1)}>
+        <ToolbarButton
+          title="Heading 1"
+          active={editor?.isActive('heading', { level: 1 })}
+          onClick={() => run((e) => e.chain().focus().toggleHeading({ level: 1 }).run())}
+        >
           <span className="label">H1</span>
         </ToolbarButton>
-        <ToolbarButton title="Heading 2" onClick={() => run(wrapInHeadingCommand.key, 2)}>
+        <ToolbarButton
+          title="Heading 2"
+          active={editor?.isActive('heading', { level: 2 })}
+          onClick={() => run((e) => e.chain().focus().toggleHeading({ level: 2 }).run())}
+        >
           <span className="label">H2</span>
         </ToolbarButton>
-        <ToolbarButton title="Heading 3" onClick={() => run(wrapInHeadingCommand.key, 3)}>
+        <ToolbarButton
+          title="Heading 3"
+          active={editor?.isActive('heading', { level: 3 })}
+          onClick={() => run((e) => e.chain().focus().toggleHeading({ level: 3 }).run())}
+        >
           <span className="label">H3</span>
         </ToolbarButton>
       </div>
@@ -61,19 +53,32 @@ export function EditorToolbar({ fontSize, onFontSize }: EditorToolbarProps): JSX
       <Divider />
 
       <div className="toolbar-group">
-        <ToolbarButton title="Bold (⌘B)" onClick={() => run(toggleStrongCommand.key)}>
+        <ToolbarButton
+          title="Bold (⌘B)"
+          active={editor?.isActive('bold')}
+          onClick={() => run((e) => e.chain().focus().toggleBold().run())}
+        >
           <strong>B</strong>
         </ToolbarButton>
-        <ToolbarButton title="Italic (⌘I)" onClick={() => run(toggleEmphasisCommand.key)}>
+        <ToolbarButton
+          title="Italic (⌘I)"
+          active={editor?.isActive('italic')}
+          onClick={() => run((e) => e.chain().focus().toggleItalic().run())}
+        >
           <em>I</em>
         </ToolbarButton>
         <ToolbarButton
           title="Strikethrough"
-          onClick={() => run(toggleStrikethroughCommand.key)}
+          active={editor?.isActive('strike')}
+          onClick={() => run((e) => e.chain().focus().toggleStrike().run())}
         >
           <span className="strike">S</span>
         </ToolbarButton>
-        <ToolbarButton title="Inline code" onClick={() => run(toggleInlineCodeCommand.key)}>
+        <ToolbarButton
+          title="Inline code"
+          active={editor?.isActive('code')}
+          onClick={() => run((e) => e.chain().focus().toggleCode().run())}
+        >
           <span className="mono">{'</>'}</span>
         </ToolbarButton>
       </div>
@@ -83,25 +88,29 @@ export function EditorToolbar({ fontSize, onFontSize }: EditorToolbarProps): JSX
       <div className="toolbar-group">
         <ToolbarButton
           title="Bulleted list"
-          onClick={() => run(wrapInBulletListCommand.key)}
+          active={editor?.isActive('bulletList')}
+          onClick={() => run((e) => e.chain().focus().toggleBulletList().run())}
         >
           <BulletIcon />
         </ToolbarButton>
         <ToolbarButton
           title="Numbered list"
-          onClick={() => run(wrapInOrderedListCommand.key)}
+          active={editor?.isActive('orderedList')}
+          onClick={() => run((e) => e.chain().focus().toggleOrderedList().run())}
         >
           <NumberedIcon />
         </ToolbarButton>
         <ToolbarButton
           title="Quote"
-          onClick={() => run(wrapInBlockquoteCommand.key)}
+          active={editor?.isActive('blockquote')}
+          onClick={() => run((e) => e.chain().focus().toggleBlockquote().run())}
         >
           <QuoteIcon />
         </ToolbarButton>
         <ToolbarButton
           title="Code block"
-          onClick={() => run(createCodeBlockCommand.key)}
+          active={editor?.isActive('codeBlock')}
+          onClick={() => run((e) => e.chain().focus().toggleCodeBlock().run())}
         >
           <CodeBlockIcon />
         </ToolbarButton>
@@ -138,14 +147,15 @@ interface ToolbarButtonProps {
   title: string;
   onClick: () => void;
   disabled?: boolean;
+  active?: boolean;
   children: ReactNode;
 }
 
-function ToolbarButton({ title, onClick, disabled, children }: ToolbarButtonProps): JSX.Element {
+function ToolbarButton({ title, onClick, disabled, active, children }: ToolbarButtonProps): JSX.Element {
   return (
     <button
       type="button"
-      className="toolbar-btn"
+      className={`toolbar-btn${active ? ' toolbar-btn-active' : ''}`}
       title={title}
       aria-label={title}
       onMouseDown={(e) => e.preventDefault()}
