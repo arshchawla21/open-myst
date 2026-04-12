@@ -201,6 +201,8 @@ h3 {
 .pane-left {
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
 }
 .pane-center {
   background: var(--bg);
@@ -210,7 +212,12 @@ h3 {
   border-left: 1px solid var(--border);
 }
 
-/* ---- Panels (placeholders) ---- */
+/* ---- Panels ---- */
+.sources-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
 .sources-panel .drop-hint,
 .chat-panel p,
 .document-placeholder {
@@ -411,6 +418,7 @@ h3 {
   font-weight: 600;
   line-height: 1.25;
   letter-spacing: -0.01em;
+  text-transform: none;
 }
 .milkdown h1 {
   font-size: 2.1em;

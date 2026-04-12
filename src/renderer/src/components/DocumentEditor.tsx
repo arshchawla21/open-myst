@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Editor, rootCtx, defaultValueCtx, editorViewCtx } from '@milkdown/kit/core';
+import { Editor, rootCtx, defaultValueCtx, editorViewCtx, parserCtx } from '@milkdown/kit/core';
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { history } from '@milkdown/kit/plugin/history';
@@ -7,8 +7,11 @@ import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
 import { clipboard } from '@milkdown/kit/plugin/clipboard';
 import { cursor } from '@milkdown/kit/plugin/cursor';
 import { trailing } from '@milkdown/kit/plugin/trailing';
+import { $prose } from '@milkdown/kit/utils';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
 import type { Node as PmNode } from '@milkdown/kit/prose/model';
+import { Slice } from '@milkdown/kit/prose/model';
+import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { bridge } from '../api/bridge';
 import { EditorToolbar } from './EditorToolbar';
 import { useHeadings } from '../store/headings';
@@ -23,6 +26,30 @@ function loadFontSize(): number {
   const parsed = raw ? Number(raw) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FONT_SIZE;
 }
+
+const markdownPaste = $prose((ctx) => {
+  return new Plugin({
+    key: new PluginKey('myst-markdown-paste'),
+    props: {
+      handlePaste(view, event) {
+        const html = event.clipboardData?.getData('text/html');
+        if (html) return false;
+
+        const text = event.clipboardData?.getData('text/plain');
+        if (!text) return false;
+
+        const parser = ctx.get(parserCtx);
+        const doc = parser(text);
+        if (!doc || doc.content.size === 0) return false;
+
+        const { tr } = view.state;
+        tr.replaceSelection(new Slice(doc.content, 0, 0));
+        view.dispatch(tr);
+        return true;
+      },
+    },
+  });
+});
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -53,6 +80,7 @@ function EditorView({ initialValue, onChange }: EditorViewProps): JSX.Element {
         .use(history)
         .use(listener)
         .use(clipboard)
+        .use(markdownPaste)
         .use(cursor)
         .use(trailing),
     [],

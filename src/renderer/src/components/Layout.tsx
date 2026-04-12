@@ -26,13 +26,13 @@ export function Layout(): JSX.Element {
       <main className="panes">
         <aside className="pane pane-left">
           <SourcesPanel />
+          <TableOfContents />
         </aside>
         <section className="pane pane-center">
           <DocumentPanel />
         </section>
         <aside className="pane pane-right">
           <ChatPanel />
-          <TableOfContents />
         </aside>
       </main>
     </div>
