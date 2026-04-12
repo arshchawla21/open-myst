@@ -5,8 +5,7 @@ import { BrowserWindow } from 'electron';
 import { IpcChannels } from '@shared/ipc-channels';
 import type { ChatMessage } from '@shared/types';
 import { getCurrentProject } from './projects';
-import { getOpenRouterKey } from './settings';
-import { getSettings } from './settings';
+import { getOpenRouterKey, getSettings } from './settings';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -189,7 +188,7 @@ function cleanChatContent(text: string): string {
     .trim();
 }
 
-export async function sendMessage(userText: string): Promise<ChatMessage> {
+export async function sendMessage(userText: string, activeDocument: string): Promise<ChatMessage> {
   const apiKey = await getOpenRouterKey();
   if (!apiKey) throw new Error('OpenRouter API key not set. Add it in Settings.');
 
@@ -197,8 +196,11 @@ export async function sendMessage(userText: string): Promise<ChatMessage> {
   const model = settings.defaultModel;
 
   const agentPrompt = await readProjectFile('agent.md');
-  const document = await readProjectFile('document.md');
+  const docPath = `documents/${activeDocument}`;
+  const document = await readProjectFile(docPath);
   const sourcesIndex = await readProjectFile('sources/index.md');
+
+  const docLabel = activeDocument.replace(/\.md$/, '');
 
   const userMsg: ChatMessage = {
     id: randomUUID(),
@@ -212,7 +214,8 @@ export async function sendMessage(userText: string): Promise<ChatMessage> {
 
   const systemContent = [
     agentPrompt,
-    '\n\n========== BEGIN document.md ==========\n' + document + '\n========== END document.md ==========',
+    `\n\n[Active document: ${docLabel}]`,
+    `\n\n========== BEGIN ${activeDocument} ==========\n` + document + `\n========== END ${activeDocument} ==========`,
     sourcesIndex.trim()
       ? '\n\n========== BEGIN sources/index.md (READ-ONLY, not part of the document) ==========\n' + sourcesIndex + '\n========== END sources/index.md =========='
       : '',
@@ -233,7 +236,7 @@ export async function sendMessage(userText: string): Promise<ChatMessage> {
 
   if (edits.length === 0 && looksLikeDocumentRequest(userText, fullContent)) {
     console.log('[myst-chat] no edits found but looks like a document change — retrying');
-    const doc = await readProjectFile('document.md');
+    const doc = await readProjectFile(docPath);
     const retryMessages = [
       ...messages,
       { role: 'assistant', content: fullContent },
@@ -254,7 +257,7 @@ export async function sendMessage(userText: string): Promise<ChatMessage> {
   let madeChanges = false;
 
   if (edits.length > 0) {
-    let doc = await readProjectFile('document.md');
+    let doc = await readProjectFile(docPath);
     console.log('[myst-chat] document before:', JSON.stringify(doc.slice(0, 300)));
 
     const failures: string[] = [];
@@ -275,7 +278,7 @@ export async function sendMessage(userText: string): Promise<ChatMessage> {
 
     if (failures.length > 0) {
       console.log('[myst-chat] retrying failed edits...');
-      const freshDoc = madeChanges ? doc : await readProjectFile('document.md');
+      const freshDoc = madeChanges ? doc : await readProjectFile(docPath);
       const retryMessages = [
         ...messages,
         { role: 'assistant', content: fullContent },
@@ -301,7 +304,7 @@ export async function sendMessage(userText: string): Promise<ChatMessage> {
 
     if (madeChanges) {
       console.log('[myst-chat] document after:', JSON.stringify(doc.slice(0, 300)));
-      await fs.writeFile(projectPath('document.md'), doc, 'utf-8');
+      await fs.writeFile(projectPath(docPath), doc, 'utf-8');
       sendToRenderer(IpcChannels.Document.Changed);
     }
   }

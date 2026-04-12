@@ -18,8 +18,8 @@ const api: MystApi = {
     listRecent: () => ipcRenderer.invoke(IpcChannels.Projects.ListRecent),
   },
   document: {
-    read: () => ipcRenderer.invoke(IpcChannels.Document.Read),
-    write: (content) => ipcRenderer.invoke(IpcChannels.Document.Write, content),
+    read: (filename) => ipcRenderer.invoke(IpcChannels.Document.Read, filename),
+    write: (filename, content) => ipcRenderer.invoke(IpcChannels.Document.Write, filename, content),
     onChanged: (callback) => {
       const handler = (): void => {
         callback();
@@ -30,8 +30,13 @@ const api: MystApi = {
       };
     },
   },
+  documents: {
+    list: () => ipcRenderer.invoke(IpcChannels.Documents.List),
+    create: (name) => ipcRenderer.invoke(IpcChannels.Documents.Create, name),
+    delete: (filename) => ipcRenderer.invoke(IpcChannels.Documents.Delete, filename),
+  },
   chat: {
-    send: (message) => ipcRenderer.invoke(IpcChannels.Chat.Send, message),
+    send: (message, activeDocument) => ipcRenderer.invoke(IpcChannels.Chat.Send, message, activeDocument),
     history: () => ipcRenderer.invoke(IpcChannels.Chat.History),
     clear: () => ipcRenderer.invoke(IpcChannels.Chat.Clear),
     onChunk: (callback) => {
@@ -50,6 +55,21 @@ const api: MystApi = {
       ipcRenderer.on(IpcChannels.Chat.ChunkDone, handler);
       return () => {
         ipcRenderer.removeListener(IpcChannels.Chat.ChunkDone, handler);
+      };
+    },
+  },
+  sources: {
+    ingest: (filePaths) => ipcRenderer.invoke(IpcChannels.Sources.Ingest, filePaths),
+    list: () => ipcRenderer.invoke(IpcChannels.Sources.List),
+    read: (slug) => ipcRenderer.invoke(IpcChannels.Sources.Read, slug),
+    delete: (slug) => ipcRenderer.invoke(IpcChannels.Sources.Delete, slug),
+    onChanged: (callback) => {
+      const handler = (): void => {
+        callback();
+      };
+      ipcRenderer.on(IpcChannels.Sources.Changed, handler);
+      return () => {
+        ipcRenderer.removeListener(IpcChannels.Sources.Changed, handler);
       };
     },
   },

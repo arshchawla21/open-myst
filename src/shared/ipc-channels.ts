@@ -18,11 +18,23 @@ export const IpcChannels = {
     Write: 'document:write',
     Changed: 'document:changed',
   },
+  Documents: {
+    List: 'documents:list',
+    Create: 'documents:create',
+    Delete: 'documents:delete',
+  },
   Chat: {
     Send: 'chat:send',
     History: 'chat:history',
     Clear: 'chat:clear',
     Chunk: 'chat:chunk',
     ChunkDone: 'chat:chunk-done',
+  },
+  Sources: {
+    Ingest: 'sources:ingest',
+    List: 'sources:list',
+    Read: 'sources:read',
+    Delete: 'sources:delete',
+    Changed: 'sources:changed',
   },
 } as const;

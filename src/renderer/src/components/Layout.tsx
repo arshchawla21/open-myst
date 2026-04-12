@@ -1,11 +1,19 @@
+import { useEffect } from 'react';
 import { useApp } from '../store/app';
+import { useDocuments } from '../store/documents';
 import { SourcesPanel } from './SourcesPanel';
+import { DocumentFiles } from './DocumentFiles';
 import { DocumentPanel } from './DocumentPanel';
 import { ChatPanel } from './ChatPanel';
 import { TableOfContents } from './TableOfContents';
 
 export function Layout(): JSX.Element {
   const { project, openSettings, closeProject } = useApp();
+  const loadFiles = useDocuments((s) => s.loadFiles);
+
+  useEffect(() => {
+    loadFiles().catch(console.error);
+  }, [loadFiles, project]);
 
   return (
     <div className="layout">
@@ -26,6 +34,7 @@ export function Layout(): JSX.Element {
       <main className="panes">
         <aside className="pane pane-left">
           <SourcesPanel />
+          <DocumentFiles />
           <TableOfContents />
         </aside>
         <section className="pane pane-center">

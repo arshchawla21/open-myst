@@ -214,14 +214,180 @@ h3 {
 
 /* ---- Panels ---- */
 .sources-panel {
-  flex: 1;
+  flex-shrink: 0;
   min-height: 0;
+  max-height: 35%;
   overflow: auto;
+}
+.sources-dragging {
+  background: rgba(var(--accent-rgb, 100, 149, 237), 0.08);
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
 }
 .sources-panel .drop-hint,
 .chat-panel p,
 .document-placeholder {
   margin-top: 16px;
+}
+.drop-hint {
+  text-align: center;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.drop-hint-small {
+  margin-top: 8px;
+  font-size: 11px;
+}
+.source-ingesting {
+  font-size: 12px;
+  color: var(--accent);
+  padding: 8px 0;
+}
+.source-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+.source-item {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.source-item:last-child {
+  border-bottom: none;
+}
+.source-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+.source-name {
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.source-delete {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.source-item:hover .source-delete {
+  opacity: 1;
+}
+.source-delete:hover {
+  color: var(--fg);
+}
+.source-summary {
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* ---- Document Files ---- */
+.docfiles-panel {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+  min-height: 60px;
+  max-height: 25%;
+  overflow: auto;
+}
+.docfiles-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.docfiles-header h2 {
+  margin: 0;
+  font-size: 11px;
+}
+.docfiles-add-btn {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.docfiles-add-btn:hover {
+  color: var(--accent);
+}
+.docfiles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.docfiles-item {
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+}
+.docfiles-item-active {
+  background: rgba(var(--accent-rgb, 100, 149, 237), 0.12);
+}
+.docfiles-item-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: left;
+  padding: 4px 8px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.docfiles-item-active .docfiles-item-btn {
+  color: var(--accent);
+  font-weight: 500;
+}
+.docfiles-item-btn:hover {
+  color: var(--accent);
+}
+.docfiles-item-delete {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.docfiles-item:hover .docfiles-item-delete {
+  opacity: 1;
+}
+.docfiles-item-delete:hover {
+  color: var(--fg);
+}
+.docfiles-new {
+  margin-bottom: 6px;
+}
+.docfiles-new-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+.docfiles-new-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 .document-placeholder {
   max-width: 720px;
@@ -388,6 +554,17 @@ h3 {
 }
 .save-indicator.save-saved {
   opacity: 0.5;
+}
+
+/* Find highlights */
+.find-highlight {
+  background: rgba(255, 213, 79, 0.3);
+  border-radius: 2px;
+}
+.find-highlight-current {
+  background: rgba(255, 213, 79, 0.7);
+  border-radius: 2px;
+  outline: 1px solid rgba(255, 213, 79, 0.9);
 }
 
 /* Find bar */
@@ -751,9 +928,17 @@ h3 {
   gap: 8px;
   flex-shrink: 0;
 }
+.chat-active-doc {
+  font-size: 11px;
+  color: var(--fg-muted);
+  padding-bottom: 4px;
+}
+.chat-active-doc strong {
+  color: var(--accent);
+}
 .chat-input-area {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
   padding: 10px 16px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;

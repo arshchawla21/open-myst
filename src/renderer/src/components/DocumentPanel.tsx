@@ -1,9 +1,11 @@
 import { useApp } from '../store/app';
+import { useDocuments } from '../store/documents';
 import { DocumentEditor } from './DocumentEditor';
 import { ErrorBoundary } from './ErrorBoundary';
 
 export function DocumentPanel(): JSX.Element {
   const { project } = useApp();
+  const activeFile = useDocuments((s) => s.activeFile);
 
   if (!project) {
     return (
@@ -15,10 +17,20 @@ export function DocumentPanel(): JSX.Element {
     );
   }
 
+  if (!activeFile) {
+    return (
+      <div className="document-panel">
+        <div className="document-placeholder">
+          <p className="muted">No document selected.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="document-panel">
       <ErrorBoundary>
-        <DocumentEditor projectPath={project.path} />
+        <DocumentEditor projectPath={project.path} activeFile={activeFile} />
       </ErrorBoundary>
     </div>
   );

@@ -34,3 +34,16 @@ export interface Heading {
   text: string;
   pos: number;
 }
+
+export interface SourceMeta {
+  slug: string;
+  originalName: string;
+  type: 'pdf' | 'markdown' | 'text';
+  addedAt: string;
+  summary: string;
+}
+
+export interface DocumentFile {
+  filename: string;
+  label: string;
+}

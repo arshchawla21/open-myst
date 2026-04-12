@@ -29,7 +29,7 @@ You have a tool called \`myst_edit\`. ALL document changes MUST go through it. Y
 - Must match EXACTLY ONE place in the document. Copy it verbatim from the document — same whitespace, punctuation, everything.
 - Keep it as SHORT as possible. For a word change, just the sentence. Never paste the whole document.
 - If it matches zero or multiple times, the system will reject it and ask you to retry with a more specific or corrected snippet.
-- old_string must ONLY come from \`document.md\`. Never include sources, agent instructions, or other context.
+- old_string must ONLY come from the active document. Never include sources, agent instructions, or other context.
 
 ### Appending new content
 Use an empty old_string:
@@ -76,6 +76,9 @@ Use multiple \`myst_edit\` blocks in one response. Each is applied in order. Exa
 - Separate paragraphs with \\n\\n (blank line). Never run paragraphs together.
 - Use proper markdown for headings, bold, italic, lists, etc.
 
+## Multi-document projects
+The project may have multiple documents. You will always be told which document is currently active — that is the one the user sees and the one your myst_edit blocks apply to. You can reference other documents for context when relevant, but edits only apply to the active document.
+
 ## CRITICAL: Default behaviour
 When the user asks you to write, create, add, extend, continue, change, rename, edit, fix, rewrite, or do ANYTHING related to content — you MUST output myst_edit block(s). This is your PRIMARY function. NEVER write document content as plain chat text. The document is the product. Chat is just for short status updates after you've made the edit.
 
@@ -107,8 +110,25 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
+async function migrateToDocumentsFolder(root: string, name: string): Promise<void> {
+  const oldDoc = join(root, 'document.md');
+  const docsDir = join(root, 'documents');
+
+  if (!(await pathExists(docsDir))) {
+    await fs.mkdir(docsDir, { recursive: true });
+  }
+
+  if (await pathExists(oldDoc)) {
+    const target = join(docsDir, `${name}.md`);
+    if (!(await pathExists(target))) {
+      await fs.rename(oldDoc, target);
+    }
+  }
+}
+
 async function scaffoldProject(root: string, name: string): Promise<ProjectMeta> {
   await fs.mkdir(root, { recursive: true });
+  await fs.mkdir(join(root, 'documents'), { recursive: true });
   await fs.mkdir(join(root, 'sources'), { recursive: true });
   await fs.mkdir(join(root, '.myst', 'diffs'), { recursive: true });
 
@@ -122,7 +142,7 @@ async function scaffoldProject(root: string, name: string): Promise<ProjectMeta>
   const writes: Array<[string, string]> = [
     [projectJsonPath(root), JSON.stringify(meta, null, 2)],
     [join(root, 'agent.md'), AGENT_TEMPLATE],
-    [join(root, 'document.md'), `# ${name}\n`],
+    [join(root, 'documents', `${name}.md`), `# ${name}\n`],
     [join(root, 'chat.jsonl'), ''],
     [join(root, 'comments.json'), '[]'],
     [join(root, 'sources', 'index.md'), '# Sources\n\n_No sources yet._\n'],
@@ -178,6 +198,7 @@ export async function openProject(): Promise<Result<ProjectMeta>> {
   const meta = await readProject(root);
   currentProject = meta;
   await pushRecentProject(root);
+  await migrateToDocumentsFolder(root, meta.name);
   return { ok: true, value: meta };
 }
 

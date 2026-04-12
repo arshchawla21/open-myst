@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MarkdownIt from 'markdown-it';
 import type { ChatMessage } from '@shared/types';
 import { useApp } from '../store/app';
+import { useDocuments } from '../store/documents';
 import { bridge } from '../api/bridge';
 
 const chatMd = new MarkdownIt({ html: false, linkify: true, breaks: true });
@@ -55,6 +56,7 @@ function stripEditBlocks(text: string): string {
 }
 
 function ChatView(): JSX.Element {
+  const activeFile = useDocuments((s) => s.activeFile);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -87,7 +89,7 @@ function ChatView(): JSX.Element {
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text || sending || !activeFile) return;
 
     setInput('');
     setError(null);
@@ -103,7 +105,7 @@ function ChatView(): JSX.Element {
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      const assistantMsg = await bridge.chat.send(text);
+      const assistantMsg = await bridge.chat.send(text, activeFile);
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {
       setError((err as Error).message);
@@ -112,7 +114,7 @@ function ChatView(): JSX.Element {
       setStreamingText('');
       inputRef.current?.focus();
     }
-  }, [input, sending]);
+  }, [input, sending, activeFile]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -198,6 +200,11 @@ function ChatView(): JSX.Element {
       )}
 
       <div className="chat-input-area">
+        {activeFile && (
+          <div className="chat-active-doc">
+            editing <strong>{activeFile.replace(/\.md$/, '')}</strong>
+          </div>
+        )}
         <textarea
           ref={inputRef}
           className="chat-input"

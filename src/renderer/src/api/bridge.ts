@@ -1,6 +1,6 @@
 import type { MystApi } from '@shared/api';
 
-const EXPECTED_NAMESPACES = ['settings', 'projects', 'document', 'chat'] as const;
+const EXPECTED_NAMESPACES = ['settings', 'projects', 'document', 'documents', 'chat', 'sources'] as const;
 
 function getApi(): MystApi {
   const api = window.myst as Partial<MystApi> | undefined;
@@ -32,7 +32,13 @@ export const bridge: MystApi = {
   get document() {
     return getApi().document;
   },
+  get documents() {
+    return getApi().documents;
+  },
   get chat() {
     return getApi().chat;
+  },
+  get sources() {
+    return getApi().sources;
   },
 } as MystApi;

@@ -15,6 +15,7 @@ import Image from '@tiptap/extension-image';
 import { Markdown } from 'tiptap-markdown';
 import MarkdownIt from 'markdown-it';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { DOMParser as PmDOMParser, Slice } from '@tiptap/pm/model';
 import { bridge } from '../api/bridge';
 import { EditorToolbar } from './EditorToolbar';
@@ -47,6 +48,32 @@ const MarkdownBlockPaste = Extension.create({
 
             view.dispatch(view.state.tr.replaceSelection(slice));
             return true;
+          },
+        },
+      }),
+    ];
+  },
+});
+
+const findHighlightKey = new PluginKey('findHighlight');
+
+const FindHighlight = Extension.create({
+  name: 'findHighlight',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: findHighlightKey,
+        state: {
+          init() { return DecorationSet.empty; },
+          apply(tr, old) {
+            const meta = tr.getMeta(findHighlightKey) as DecorationSet | undefined;
+            if (meta !== undefined) return meta;
+            return old.map(tr.mapping, tr.doc);
+          },
+        },
+        props: {
+          decorations(state) {
+            return findHighlightKey.getState(state) as DecorationSet;
           },
         },
       }),
@@ -104,6 +131,7 @@ function TiptapEditor({ initialValue, onMarkdownChange, onEditorReady }: TiptapE
       Link.configure({ openOnClick: false }),
       Image,
       MarkdownBlockPaste,
+      FindHighlight,
       Markdown.configure({
         html: false,
         transformPastedText: true,
@@ -127,9 +155,10 @@ function TiptapEditor({ initialValue, onMarkdownChange, onEditorReady }: TiptapE
 
 interface DocumentEditorProps {
   projectPath: string;
+  activeFile: string;
 }
 
-export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Element {
+export function DocumentEditor({ projectPath, activeFile }: DocumentEditorProps): JSX.Element {
   const [initialValue, setInitialValue] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [status, setStatus] = useState<SaveStatus>('idle');
@@ -165,7 +194,7 @@ export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Elemen
     setLoadError(null);
     setEditor(null);
     bridge.document
-      .read()
+      .read(activeFile)
       .then((content) => {
         if (cancelled) return;
         lastSavedRef.current = content;
@@ -180,20 +209,20 @@ export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Elemen
       cancelled = true;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [projectPath]);
+  }, [projectPath, activeFile]);
 
   const [contentVersion, setContentVersion] = useState(0);
 
   useEffect(() => {
     const off = bridge.document.onChanged(() => {
-      bridge.document.read().then((content) => {
+      bridge.document.read(activeFile).then((content) => {
         lastSavedRef.current = content;
         setInitialValue(content);
         setContentVersion((v) => v + 1);
       }).catch(console.error);
     });
     return off;
-  }, []);
+  }, [activeFile]);
 
   const syncHeadings = useCallback(() => {
     if (!editor) return;
@@ -224,6 +253,9 @@ export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Elemen
     clearScroll();
   }, [scrollToPos, editor, clearScroll]);
 
+  const activeFileRef = useRef(activeFile);
+  activeFileRef.current = activeFile;
+
   const scheduleSave = useCallback(
     (markdown: string): void => {
       if (markdown === lastSavedRef.current) return;
@@ -231,7 +263,7 @@ export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Elemen
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         bridge.document
-          .write(markdown)
+          .write(activeFileRef.current, markdown)
           .then(() => {
             lastSavedRef.current = markdown;
             setStatus('saved');
@@ -276,7 +308,7 @@ export function DocumentEditor({ projectPath }: DocumentEditorProps): JSX.Elemen
       <div className="document-scroll">
         <div className="document-page">
           <TiptapEditor
-            key={`${projectPath}-${contentVersion}`}
+            key={`${projectPath}-${activeFile}-${contentVersion}`}
             initialValue={initialValue}
             onMarkdownChange={scheduleSave}
             onEditorReady={handleEditorReady}
@@ -329,6 +361,12 @@ function FindBar({ editor, onClose }: FindBarProps): JSX.Element {
     [editor],
   );
 
+  const clearHighlights = useCallback(() => {
+    if (!editor) return;
+    const tr = editor.state.tr.setMeta(findHighlightKey, DecorationSet.empty);
+    editor.view.dispatch(tr);
+  }, [editor]);
+
   const highlightAndScroll = useCallback(
     (q: string, index: number) => {
       if (!editor) return;
@@ -336,19 +374,28 @@ function FindBar({ editor, onClose }: FindBarProps): JSX.Element {
       setMatchCount(matches.length);
       if (matches.length === 0) {
         setCurrentMatch(0);
+        clearHighlights();
         return;
       }
       const i = ((index % matches.length) + matches.length) % matches.length;
       setCurrentMatch(i + 1);
+
+      const decos = matches.map((m, idx) =>
+        Decoration.inline(m.from, m.to, {
+          class: idx === i ? 'find-highlight-current' : 'find-highlight',
+        }),
+      );
+      const tr = editor.state.tr.setMeta(findHighlightKey, DecorationSet.create(editor.state.doc, decos));
+      editor.view.dispatch(tr);
+
       const match = matches[i];
       if (!match) return;
-      editor.commands.setTextSelection(match);
       const view = editor.view;
       const dom = view.domAtPos(match.from);
       const el = dom.node instanceof HTMLElement ? dom.node : dom.node.parentElement;
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     },
-    [editor, findMatches],
+    [editor, findMatches, clearHighlights],
   );
 
   const handleChange = useCallback(
@@ -359,9 +406,10 @@ function FindBar({ editor, onClose }: FindBarProps): JSX.Element {
       } else {
         setMatchCount(0);
         setCurrentMatch(0);
+        clearHighlights();
       }
     },
-    [highlightAndScroll],
+    [highlightAndScroll, clearHighlights],
   );
 
   const goNext = useCallback(() => {
@@ -372,6 +420,11 @@ function FindBar({ editor, onClose }: FindBarProps): JSX.Element {
     if (query) highlightAndScroll(query, currentMatch - 2);
   }, [query, currentMatch, highlightAndScroll]);
 
+  const handleClose = useCallback(() => {
+    clearHighlights();
+    onClose();
+  }, [clearHighlights, onClose]);
+
   const handleKeyDown = useCallback(
     (e: ReactKeyboardEvent) => {
       if (e.key === 'Enter') {
@@ -380,10 +433,10 @@ function FindBar({ editor, onClose }: FindBarProps): JSX.Element {
         else goNext();
       }
       if (e.key === 'Escape') {
-        onClose();
+        handleClose();
       }
     },
-    [goNext, goPrev, onClose],
+    [goNext, goPrev, handleClose],
   );
 
   return (
@@ -406,7 +459,7 @@ function FindBar({ editor, onClose }: FindBarProps): JSX.Element {
       <button type="button" className="find-btn" onClick={goNext} disabled={matchCount === 0} title="Next (Enter)">
         &#x25BC;
       </button>
-      <button type="button" className="find-btn find-close" onClick={onClose} title="Close (Esc)">
+      <button type="button" className="find-btn find-close" onClick={handleClose} title="Close (Esc)">
         &#x2715;
       </button>
     </div>

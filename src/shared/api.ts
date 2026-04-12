@@ -1,4 +1,4 @@
-import type { AppSettings, ChatMessage, ProjectMeta, Result } from './types';
+import type { AppSettings, ChatMessage, DocumentFile, ProjectMeta, Result, SourceMeta } from './types';
 
 export interface MystApi {
   settings: {
@@ -16,15 +16,27 @@ export interface MystApi {
     listRecent: () => Promise<string[]>;
   };
   document: {
-    read: () => Promise<string>;
-    write: (content: string) => Promise<void>;
+    read: (filename: string) => Promise<string>;
+    write: (filename: string, content: string) => Promise<void>;
     onChanged: (callback: () => void) => () => void;
   };
+  documents: {
+    list: () => Promise<DocumentFile[]>;
+    create: (name: string) => Promise<DocumentFile>;
+    delete: (filename: string) => Promise<void>;
+  };
   chat: {
-    send: (message: string) => Promise<ChatMessage>;
+    send: (message: string, activeDocument: string) => Promise<ChatMessage>;
     history: () => Promise<ChatMessage[]>;
     clear: () => Promise<void>;
     onChunk: (callback: (chunk: string) => void) => () => void;
     onChunkDone: (callback: () => void) => () => void;
+  };
+  sources: {
+    ingest: (filePaths: string[]) => Promise<SourceMeta[]>;
+    list: () => Promise<SourceMeta[]>;
+    read: (slug: string) => Promise<string>;
+    delete: (slug: string) => Promise<void>;
+    onChanged: (callback: () => void) => () => void;
   };
 }
