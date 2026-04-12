@@ -139,8 +139,9 @@ export function EditorToolbar({ editor, fontSize, onFontSize }: EditorToolbarPro
           <CodeBlockIcon />
         </ToolbarButton>
         <ToolbarButton
-          title="Insert table"
+          title="Insert table (coming soon)"
           onClick={insertTable}
+          disabled
         >
           <TableIcon />
         </ToolbarButton>

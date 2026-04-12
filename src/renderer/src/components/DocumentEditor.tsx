@@ -13,6 +13,7 @@ import TableHeader from '@tiptap/extension-table-header';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 import { Markdown } from 'tiptap-markdown';
+import MarkdownIt from 'markdown-it';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { DOMParser as PmDOMParser } from '@tiptap/pm/model';
 import { bridge } from '../api/bridge';
@@ -21,35 +22,31 @@ import { useHeadings } from '../store/headings';
 import type { Heading } from '@shared/types';
 import type { Editor } from '@tiptap/core';
 
+const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
+
 const MarkdownBlockPaste = Extension.create({
   name: 'markdownBlockPaste',
   addProseMirrorPlugins() {
-    const editor = this.editor;
     return [
       new Plugin({
         key: new PluginKey('markdownBlockPaste'),
         props: {
           handlePaste(view, event) {
-            const html = event.clipboardData?.getData('text/html');
-            if (html) return false;
+            const clipboardHtml = event.clipboardData?.getData('text/html');
+            if (clipboardHtml) return false;
 
             const text = event.clipboardData?.getData('text/plain');
             if (!text) return false;
 
-            const storage = editor.storage as unknown as Record<
-              string,
-              { parser?: { parse: (t: string, opts?: { inline?: boolean }) => string } }
-            >;
-            const parser = storage['markdown']?.parser;
-            if (!parser) return false;
+            const html = md.render(text);
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = html;
 
-            const parsed = parser.parse(text);
-            const el = document.createElement('div');
-            el.innerHTML = parsed;
-
-            const slice = PmDOMParser.fromSchema(view.state.schema).parseSlice(el, {
-              preserveWhitespace: true,
+            const slice = PmDOMParser.fromSchema(view.state.schema).parseSlice(wrapper, {
+              preserveWhitespace: false,
             });
+
+            if (!slice.content.childCount) return false;
 
             const { tr } = view.state;
             tr.replaceSelection(slice);
