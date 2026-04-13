@@ -4,7 +4,12 @@ import { IpcChannels } from '@shared/ipc-channels';
 import type { PendingEdit } from '@shared/types';
 import { projectPath, ensureDir, broadcast, log, logError } from '../../platform';
 import { readDocument, writeDocument } from '../documents';
-import { applyEditOccurrence, applyEditOccurrenceFuzzy, mergePendingEdits } from '../chat/editLogic';
+import {
+  applyEditOccurrence,
+  applyEditOccurrenceAnchored,
+  applyEditOccurrenceFuzzy,
+  mergePendingEdits,
+} from '../chat/editLogic';
 
 /**
  * Pending edits: the staging area between "LLM proposed an edit" and "the
@@ -162,6 +167,22 @@ export async function acceptPendingEdit(id: string, overrideNewString?: string):
         oldStringPreview: edit.oldString.slice(0, 120),
       });
       newDoc = fuzzy;
+    }
+  }
+  if (newDoc === null) {
+    // Still no match — try anchor-based matching. Handles long old_strings
+    // where the LLM transcribed a paragraph with one embedded link/italic
+    // slightly wrong (e.g. different link slug, lost bold). Matches by
+    // prefix + suffix in normalized (markdown-stripped) space and splices
+    // the replacement back onto the raw doc using a position map.
+    const anchored = applyEditOccurrenceAnchored(doc, edit.oldString, effectiveNewString, edit.occurrence);
+    if (anchored !== null) {
+      log('pending', 'accept.anchoredMatch', {
+        id,
+        doc: docFilename,
+        oldStringPreview: edit.oldString.slice(0, 120),
+      });
+      newDoc = anchored;
     }
   }
   if (newDoc === null) {

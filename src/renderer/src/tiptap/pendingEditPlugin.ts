@@ -94,6 +94,36 @@ function stripMarkdownLinePrefixes(s: string): string {
     .join('\n');
 }
 
+/**
+ * Strip *inline* markdown markers so a paragraph containing `**bold**`,
+ * `*italic*`, `` `code` ``, or `[text](url)` can still match PM's flat text,
+ * which has all of those stripped to their visible form. Without this fallback,
+ * any edit whose old_string contains inline formatting silently fails to
+ * render the red/green diff even though accept (which works on the raw file)
+ * succeeds.
+ *
+ * Handled cases, in order:
+ *   - `[text](url)` and `[text][ref]` → `text` (link markers)
+ *   - `![alt](url)` → `alt` (image markers — rare in edits but cheap to cover)
+ *   - ``code``     → `code` (inline code)
+ *   - `**x**`, `__x__`, `*x*`, `_x_` → `x` (bold/italic)
+ *   - `~~x~~` → `x` (strikethrough)
+ *   - `\*` / `\_` / `\[` etc. → dropped backslash (markdown escapes)
+ */
+function stripMarkdownInline(s: string): string {
+  return s
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/(?<![*\w])\*([^*\n]+)\*(?!\w)/g, '$1')
+    .replace(/(?<![_\w])_([^_\n]+)_(?!\w)/g, '$1')
+    .replace(/\\([\\`*_{}[\]()#+\-.!])/g, '$1');
+}
+
 function findPendingEditRange(
   doc: PmNode,
   oldString: string,
@@ -110,16 +140,28 @@ function findPendingEditRange(
     return rangeFromFlatHit(exact, oldString.length, posMap);
   }
 
-  // Fallback: strip markdown line markers from the needle. Without this, a
+  // Fallback 1: strip markdown line markers from the needle. Without this, a
   // pending edit whose old_string is `# Physics Story` can't be located in a
   // PM doc whose flat text is `Physics Story`, so the diff widget silently
   // renders nothing — even though accept (which runs on the raw file on disk)
   // succeeds. Covers the common heading/list/blockquote-prefix cases.
-  const normalized = stripMarkdownLinePrefixes(oldString);
-  if (normalized !== oldString && normalized.length > 0) {
-    const fuzzy = locateOccurrence(flat, normalized, occurrence);
+  const linesStripped = stripMarkdownLinePrefixes(oldString);
+  if (linesStripped !== oldString && linesStripped.length > 0) {
+    const fuzzy = locateOccurrence(flat, linesStripped, occurrence);
     if (fuzzy !== null) {
-      return rangeFromFlatHit(fuzzy, normalized.length, posMap);
+      return rangeFromFlatHit(fuzzy, linesStripped.length, posMap);
+    }
+  }
+
+  // Fallback 2: also strip inline markdown markers (bold/italic/code/link).
+  // "Rewrite this to 50 words" edits are the common trigger — the LLM copies
+  // a whole paragraph into old_string, and any `**word**` or `[link](url)` in
+  // it breaks the match against PM's flat text.
+  const fullyStripped = stripMarkdownInline(linesStripped);
+  if (fullyStripped !== linesStripped && fullyStripped.length > 0) {
+    const fuzzy = locateOccurrence(flat, fullyStripped, occurrence);
+    if (fuzzy !== null) {
+      return rangeFromFlatHit(fuzzy, fullyStripped.length, posMap);
     }
   }
   return null;

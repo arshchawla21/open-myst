@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   applyEditOccurrence,
+  applyEditOccurrenceAnchored,
   applyEditOccurrenceFuzzy,
   cleanChatContent,
   locateEdit,
@@ -490,5 +491,56 @@ describe('cleanChatContent', () => {
   it('collapses excessive blank lines', () => {
     const cleaned = cleanChatContent('a\n\n\n\n\nb');
     expect(cleaned).toBe('a\n\nb');
+  });
+
+  it('strips chain-of-thought channel markers', () => {
+    const cleaned = cleanChatContent(
+      '<|channel>thought\n<channel|>\n\nTrimmed the analysis down to the essentials.',
+    );
+    expect(cleaned).not.toContain('<|channel');
+    expect(cleaned).not.toContain('<channel|');
+    expect(cleaned).toContain('Trimmed the analysis down to the essentials.');
+  });
+
+  it('strips <think>…</think> reasoning blocks', () => {
+    const cleaned = cleanChatContent(
+      '<think>first I should consider X</think>\n\nHere is your answer.',
+    );
+    expect(cleaned).not.toContain('<think>');
+    expect(cleaned).not.toContain('consider X');
+    expect(cleaned).toContain('Here is your answer.');
+  });
+});
+
+describe('applyEditOccurrenceAnchored', () => {
+  it('matches a long paragraph whose embedded link was slightly mangled', () => {
+    const doc =
+      '# Case\n\nSome intro text that is not relevant.\n\n' +
+      'Applying deductive reasoning to *Burns v MAN Automotive* [Burns v MAN Automotive](burns_v_man_automotive.md), the court began with the general legal principles of contract law, specifically concerning breach of warranty and the calculation of damages. The court applied those principles to the specific facts of the case and reached a conclusion about the appropriate measure of damages.\n\n' +
+      '## Footer\n\nEnd.';
+    // LLM produced the same paragraph but with a subtly different link slug.
+    const oldString =
+      'Applying deductive reasoning to *Burns v MAN Automotive* [Burns v MAN Automotive](burns_v_man_automotive_case.md), the court began with the general legal principles of contract law, specifically concerning breach of warranty and the calculation of damages. The court applied those principles to the specific facts of the case and reached a conclusion about the appropriate measure of damages.';
+    const newString = 'REPLACED PARAGRAPH.';
+    const result = applyEditOccurrenceAnchored(doc, oldString, newString, 1);
+    expect(result).not.toBeNull();
+    expect(result).toContain('REPLACED PARAGRAPH.');
+    expect(result).toContain('# Case');
+    expect(result).toContain('## Footer');
+    // Make sure we didn't accidentally nuke the footer or intro.
+    expect(result).toContain('Some intro text');
+    expect(result).toContain('End.');
+  });
+
+  it('returns null for short old strings (anchors are too risky)', () => {
+    const result = applyEditOccurrenceAnchored('hello world', 'hello', 'hi', 1);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when anchors cannot be found', () => {
+    const doc = 'a'.repeat(500);
+    const oldString = 'completely different content that is long enough to be a paragraph in any document by human standards';
+    const result = applyEditOccurrenceAnchored(doc, oldString, 'new', 1);
+    expect(result).toBeNull();
   });
 });

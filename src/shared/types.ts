@@ -18,7 +18,7 @@ export interface ProjectSummary {
 
 export type Result<T, E = string> = { ok: true; value: T } | { ok: false; error: E };
 
-export const DEFAULT_MODEL = 'google/gemma-3-27b-it';
+export const DEFAULT_MODEL = 'google/gemma-4-26b-a4b-it';
 
 export type ChatRole = 'user' | 'assistant';
 

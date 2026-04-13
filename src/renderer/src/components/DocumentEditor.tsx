@@ -123,7 +123,7 @@ const FindHighlight = Extension.create({
 });
 
 const FONT_SIZE_STORAGE_KEY = 'myst:font-size';
-const DEFAULT_FONT_SIZE = 18;
+const DEFAULT_FONT_SIZE = 13;
 
 function loadFontSize(): number {
   if (typeof window === 'undefined') return DEFAULT_FONT_SIZE;

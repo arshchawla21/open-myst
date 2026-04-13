@@ -839,7 +839,7 @@ h3 {
 .tiptap {
   font-family: var(--font-serif);
   color: var(--doc-fg);
-  font-size: var(--doc-font-size, 18px);
+  font-size: var(--doc-font-size, 13px);
   line-height: 1.25;
   font-feature-settings: 'kern', 'liga', 'calt';
   -webkit-font-smoothing: antialiased;
@@ -1504,7 +1504,7 @@ h3 {
   white-space: pre-wrap;
   cursor: text;
   font-family: var(--font-serif);
-  font-size: var(--doc-font-size, 18px);
+  font-size: var(--doc-font-size, 13px);
   line-height: 1.25;
   color: var(--doc-fg);
 }
@@ -1598,7 +1598,7 @@ h3 {
  * between render and edit doesn't reflow. */
 .pending-insert-textarea {
   font-family: var(--font-serif);
-  font-size: var(--doc-font-size, 18px);
+  font-size: var(--doc-font-size, 13px);
   line-height: 1.25;
 }
 /* Inline/display math rendered via KaTeX in the main document. The raw

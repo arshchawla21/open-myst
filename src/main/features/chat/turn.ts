@@ -222,7 +222,19 @@ export async function runTurn(ctx: TurnContext): Promise<ChatMessage> {
       { role: 'assistant', content: fullContent },
       {
         role: 'user',
-        content: `You forgot to include the myst_edit block. Here is the current document:\n\n${doc}\n\nPlease output the myst_edit block(s) now to make the change.`,
+        content:
+          `STOP. Your previous response did not contain a myst_edit code block, so nothing was applied to the document.\n\n` +
+          `Your next response MUST begin with a fenced code block in exactly this format — no prose before it, no explanation, no apology:\n\n` +
+          '```myst_edit\n' +
+          `{\n  "old_string": "...",\n  "new_string": "..."\n}\n` +
+          '```\n\n' +
+          `Rules:\n` +
+          `- To APPEND new content at the end of the document, set old_string to "" (empty string).\n` +
+          `- To REPLACE existing text, copy the exact text from the document into old_string.\n` +
+          `- To INSERT at a specific spot, set old_string to the text just before the insert point and new_string to that same text plus the new content.\n` +
+          `- Do NOT mention myst_edit, old_string, or new_string in prose. Emit the block, then at most one short sentence of chat after.\n\n` +
+          `Here is the current document:\n\n${doc}\n\n` +
+          `Now emit the myst_edit block to fulfil the original request: "${userText.slice(0, 200)}"`,
       },
     ];
     const retryContent = await streamChat({

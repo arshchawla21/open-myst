@@ -184,6 +184,228 @@ export function applyEditOccurrenceFuzzy(
   return null;
 }
 
+/**
+ * Normalize text to a "plain reading form" for anchor matching: strip inline
+ * markdown markers (bold, italic, code, links, strikethrough, escapes) and
+ * collapse whitespace runs into single spaces. Used only for locating anchor
+ * points — the actual replacement still happens on the raw doc via the
+ * positions recovered from the position map.
+ */
+function normalizeForAnchor(s: string): string {
+  return s
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    .replace(/_([^_\n]+)_/g, '$1')
+    .replace(/\\([\\`*_{}[\]()#+\-.!])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Build a normalized view of `doc` plus a map from each normalized char index
+ * back to the raw doc position, so a match found in normalized space can be
+ * spliced back onto the original markdown.
+ */
+function buildNormalizedView(doc: string): { normalized: string; rawPos: number[] } {
+  const norm: string[] = [];
+  const rawPos: number[] = [];
+  let i = 0;
+  let lastEmittedSpace = false;
+
+  const skipMarker = (len: number): void => {
+    i += len;
+  };
+  const emitChar = (ch: string, srcIdx: number): void => {
+    const isSpace = /\s/.test(ch);
+    if (isSpace) {
+      if (lastEmittedSpace || norm.length === 0) {
+        return;
+      }
+      norm.push(' ');
+      rawPos.push(srcIdx);
+      lastEmittedSpace = true;
+    } else {
+      norm.push(ch);
+      rawPos.push(srcIdx);
+      lastEmittedSpace = false;
+    }
+  };
+
+  while (i < doc.length) {
+    const rest = doc.slice(i);
+
+    // ![alt](url) — image
+    let m = /^!\[([^\]]*)\]\([^)]*\)/.exec(rest);
+    if (m) {
+      const alt = m[1]!;
+      const altStart = i + 2;
+      for (let k = 0; k < alt.length; k++) emitChar(alt[k]!, altStart + k);
+      skipMarker(m[0].length);
+      continue;
+    }
+    // [text](url) — link
+    m = /^\[([^\]]+)\]\([^)]*\)/.exec(rest);
+    if (m) {
+      const text = m[1]!;
+      const textStart = i + 1;
+      for (let k = 0; k < text.length; k++) emitChar(text[k]!, textStart + k);
+      skipMarker(m[0].length);
+      continue;
+    }
+    // [text][ref] — reference link
+    m = /^\[([^\]]+)\]\[[^\]]*\]/.exec(rest);
+    if (m) {
+      const text = m[1]!;
+      const textStart = i + 1;
+      for (let k = 0; k < text.length; k++) emitChar(text[k]!, textStart + k);
+      skipMarker(m[0].length);
+      continue;
+    }
+    // `code`
+    m = /^`([^`]+)`/.exec(rest);
+    if (m) {
+      const text = m[1]!;
+      const textStart = i + 1;
+      for (let k = 0; k < text.length; k++) emitChar(text[k]!, textStart + k);
+      skipMarker(m[0].length);
+      continue;
+    }
+    // ~~strike~~
+    m = /^~~([^~]+)~~/.exec(rest);
+    if (m) {
+      const text = m[1]!;
+      const textStart = i + 2;
+      for (let k = 0; k < text.length; k++) emitChar(text[k]!, textStart + k);
+      skipMarker(m[0].length);
+      continue;
+    }
+    // **bold**
+    m = /^\*\*([^*]+)\*\*/.exec(rest);
+    if (m) {
+      const text = m[1]!;
+      const textStart = i + 2;
+      for (let k = 0; k < text.length; k++) emitChar(text[k]!, textStart + k);
+      skipMarker(m[0].length);
+      continue;
+    }
+    // __bold__
+    m = /^__([^_]+)__/.exec(rest);
+    if (m) {
+      const text = m[1]!;
+      const textStart = i + 2;
+      for (let k = 0; k < text.length; k++) emitChar(text[k]!, textStart + k);
+      skipMarker(m[0].length);
+      continue;
+    }
+    // *italic*
+    m = /^\*([^*\n]+)\*/.exec(rest);
+    if (m) {
+      const text = m[1]!;
+      const textStart = i + 1;
+      for (let k = 0; k < text.length; k++) emitChar(text[k]!, textStart + k);
+      skipMarker(m[0].length);
+      continue;
+    }
+    // _italic_
+    m = /^_([^_\n]+)_/.exec(rest);
+    if (m) {
+      const text = m[1]!;
+      const textStart = i + 1;
+      for (let k = 0; k < text.length; k++) emitChar(text[k]!, textStart + k);
+      skipMarker(m[0].length);
+      continue;
+    }
+    // \escape
+    m = /^\\([\\`*_{}[\]()#+\-.!])/.exec(rest);
+    if (m) {
+      emitChar(m[1]!, i + 1);
+      skipMarker(m[0].length);
+      continue;
+    }
+
+    emitChar(doc[i]!, i);
+    i++;
+  }
+
+  // Trim leading/trailing whitespace chars without losing position info.
+  while (norm.length > 0 && norm[0] === ' ') {
+    norm.shift();
+    rawPos.shift();
+  }
+  while (norm.length > 0 && norm[norm.length - 1] === ' ') {
+    norm.pop();
+    rawPos.pop();
+  }
+
+  return { normalized: norm.join(''), rawPos };
+}
+
+/**
+ * Last-resort accept fallback. When exact and whitespace-fuzzy matching both
+ * fail, match on a *prefix + suffix anchor* in normalized (markdown-stripped,
+ * whitespace-collapsed) space. The typical failure: LLM's old_string is a
+ * 1000-char paragraph whose body is correct but one embedded link/italic
+ * differs slightly from the doc. Anchoring on the first and last ~40 chars
+ * of plain text reliably finds the range, and we splice back onto the raw
+ * doc using the position map.
+ *
+ * Safeguards:
+ *   - `oldString` must be long enough that anchors are unambiguous (≥ 60 chars).
+ *   - The prefix anchor must locate; the suffix anchor must locate *after* the
+ *     prefix in the same normalized view.
+ *   - For multi-occurrence cases, we honour `occurrence` by scanning normalized
+ *     space left-to-right.
+ */
+export function applyEditOccurrenceAnchored(
+  doc: string,
+  oldString: string,
+  newString: string,
+  occurrence: number,
+): string | null {
+  if (oldString === '') return null;
+
+  const oldNorm = normalizeForAnchor(oldString);
+  if (oldNorm.length < 60) return null;
+
+  const anchorLen = Math.min(40, Math.floor(oldNorm.length / 3));
+  const prefixNorm = oldNorm.slice(0, anchorLen);
+  const suffixNorm = oldNorm.slice(-anchorLen);
+
+  const { normalized: docNorm, rawPos } = buildNormalizedView(doc);
+  if (docNorm.length === 0) return null;
+
+  // Find the nth prefix occurrence.
+  let prefixIdx = -1;
+  let nth = 0;
+  let searchFrom = 0;
+  while (nth < occurrence) {
+    prefixIdx = docNorm.indexOf(prefixNorm, searchFrom);
+    if (prefixIdx === -1) return null;
+    nth++;
+    if (nth < occurrence) searchFrom = prefixIdx + 1;
+  }
+
+  // Find the next suffix occurrence after the prefix end.
+  const minSuffixStart = prefixIdx + prefixNorm.length - 1;
+  const suffixIdx = docNorm.indexOf(suffixNorm, Math.max(0, minSuffixStart - anchorLen));
+  if (suffixIdx === -1 || suffixIdx < prefixIdx) return null;
+
+  const startRaw = rawPos[prefixIdx];
+  const lastNormIdx = suffixIdx + suffixNorm.length - 1;
+  const lastRaw = rawPos[lastNormIdx];
+  if (startRaw === undefined || lastRaw === undefined) return null;
+  const endRaw = lastRaw + 1;
+  if (endRaw <= startRaw) return null;
+
+  return doc.slice(0, startRaw) + newString + doc.slice(endRaw);
+}
+
 const CHANGE_WORDS = /\b(changed|updated|switched|swapped|renamed|replaced|tweaked|edited|modified|added|wrote|dropped|inserted|promotion|start|here'?s)\b/i;
 const REQUEST_WORDS = /\b(write|create|add|change|rename|edit|fix|rewrite|make|extend|continue|update|swap|replace|remove|delete)\b/i;
 
@@ -260,6 +482,14 @@ export function cleanChatContent(text: string): string {
     .replace(/myst_edit/gi, '')
     .replace(/old_string/g, '')
     .replace(/new_string/g, '')
+    // Strip chain-of-thought / channel markers from reasoning-tuned models.
+    // Some OpenRouter models (various gemma / qwen / glm variants) leak raw
+    // `<|channel|>thought ... <|channel|>final` or `<think>...</think>` style
+    // tokens into the stream. These aren't intended for the user.
+    .replace(/<\|channel\|?>[\s\S]*?<\/?channel\|?>/gi, '')
+    .replace(/<\|(?:channel|thinking|thought|reasoning|assistant|system|user)[^>]*\|?>/gi, '')
+    .replace(/<\/?(?:channel|thinking|thought|reasoning)\|?>/gi, '')
+    .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
