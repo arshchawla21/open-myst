@@ -54,4 +54,7 @@ export const IpcChannels = {
     Delete: 'sources:delete',
     Changed: 'sources:changed',
   },
+  Wiki: {
+    Graph: 'wiki:graph',
+  },
 } as const;

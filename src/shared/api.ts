@@ -7,6 +7,7 @@ import type {
   ProjectMeta,
   Result,
   SourceMeta,
+  WikiGraph,
 } from './types';
 
 export interface MystApi {
@@ -67,5 +68,8 @@ export interface MystApi {
     patch: (docFilename: string, id: string, newString: string) => Promise<void>;
     clear: (docFilename: string) => Promise<void>;
     onChanged: (callback: () => void) => () => void;
+  };
+  wiki: {
+    graph: () => Promise<WikiGraph>;
   };
 }

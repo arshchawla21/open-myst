@@ -199,8 +199,38 @@ The document stays immutable until Accept — edits are layered on top as pendin
 - Edit proposal parsing, inline diff rendering, accept/reject/discuss.
 - `comments.json` persistence.
 
-**Phase 5 — WIKI Deep Dive**
-- Will go further into the world of WIKI, each source inputted will be linked to similar sources creating a users "web of information"
+**Phase 5 — Research Wiki (the real identity shift)**
+
+Myst is not a chatbot that edits a document. Myst is a **research collaborator** whose memory is a per-project wiki the agent maintains silently under the hood. The user never has to ask it to "use the wiki" — reading it is the agent's default behaviour on every turn.
+
+*On-disk shape* (hidden from the user's file browser, lives alongside sources):
+```
+.myst/wiki/
+  index.md      # auto-rewritten on every source change: sources / concepts / findings sections
+  log.md        # append-only audit trail of ingests, deletes, and (later) concept drops
+```
+Source summaries themselves still live at `sources/<slug>.md` (user-visible). The wiki index points at them — one layer of indirection so the agent always orients from the index first, then opens specific pages.
+
+*Ingest pipeline integration:*
+1. User drops a source. Existing `generateDigest` runs as before, but now it sees the list of existing sources and is told it may cite them with `[Name](slug.md)` wikilinks inside the summary.
+2. After the source is written, `updateWikiIndex(all)` rewrites `.myst/wiki/index.md` with the full source list + placeholders for Concepts / Findings.
+3. `appendWikiLog('ingest', '<name> (<slug>)')` adds an entry to the log.
+4. Deletes do the same in reverse.
+
+*Agent wiring:*
+- `agent.md` is rewritten with a "research-wiki mindset" preamble as the first operating instruction. It describes the index as the default memory surface and mandates consulting it before every answer/edit, following backlinks, citing inline with wikilinks, and never asking the user to re-attach indexed sources.
+- Every chat turn injects `.myst/wiki/index.md` into the system prompt (replacing the old `sources/index.md` injection). The agent orients from the index, then reads specific source pages as needed — anti-RAG, explicit reads, no embeddings.
+- `agent.md` also locks down document ownership: the agent edits the active document via `myst_edit` only, and never creates new files under `documents/`. Source file management is entirely system-driven.
+
+*Graph popup ("under the hood" trust signal):*
+- `computeWikiGraph(sources)` is a pure function that extracts wikilink edges from source summaries (`]( <slug>.md )`) and returns `{ nodes, edges }`. No embeddings, no separate inference pass — edges fall out of summaries the LLM already wrote.
+- A new IPC channel `wiki:graph` exposes it to the renderer.
+- `WikiGraphModal` renders the graph as a force-directed SVG inside a full-screen modal, triggered by a ◎ button in the Sources panel header. Hover a node → see its index summary. Click → open the source preview. Vanilla force-sim, no d3 dependency. Deliberately gimmicky — it's a glance at what the agent has been weaving together, not a serious analysis tool.
+
+*Not included in this phase (deferred):*
+- Concept pages (`wiki/concepts/<slug>.md`). The index reserves a section for them, but the LLM creates them autonomously later — Phase 5.1 will let the agent write concept pages via a `wiki_write` tool block.
+- Findings as first-class pages. Same story — placeholder section exists, agent fills it in via Phase 5.1 tool.
+- Multi-project knowledge sharing. One wiki per project, by design.
 
 **Phase 6 — Polish + packaging**
 - Theming, keyboard shortcuts, empty states, error handling around OpenRouter outages.

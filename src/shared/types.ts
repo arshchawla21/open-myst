@@ -72,3 +72,20 @@ export interface PendingEdit {
   batchIndex: number;
   batchTotal: number;
 }
+
+export interface WikiGraphNode {
+  id: string;
+  name: string;
+  indexSummary: string;
+  addedAt: string;
+}
+
+export interface WikiGraphEdge {
+  source: string;
+  target: string;
+}
+
+export interface WikiGraph {
+  nodes: WikiGraphNode[];
+  edges: WikiGraphEdge[];
+}

@@ -5,6 +5,7 @@ import { IpcChannels } from '@shared/ipc-channels';
 import type { SourceMeta } from '@shared/types';
 import { getCurrentProject } from './projects';
 import { getOpenRouterKey, getSettings } from './settings';
+import { updateWikiIndex, appendWikiLog } from './wiki';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -193,6 +194,11 @@ export async function ingestSources(filePaths: string[]): Promise<SourceMeta[]> 
   }
 
   await updateSourcesIndex();
+  const all = await listSources();
+  await updateWikiIndex(all);
+  for (const m of results) {
+    await appendWikiLog('ingest', `${m.name} (${m.slug})`);
+  }
   sendToRenderer(IpcChannels.Sources.Changed);
   return results;
 }
@@ -204,6 +210,8 @@ export async function ingestText(text: string, title: string): Promise<SourceMet
   const meta = await saveSource(slug, digest, 'pasted', title);
 
   await updateSourcesIndex();
+  await updateWikiIndex(await listSources());
+  await appendWikiLog('ingest', `${meta.name} (${meta.slug})`);
   sendToRenderer(IpcChannels.Sources.Changed);
   return meta;
 }
@@ -258,5 +266,7 @@ export async function deleteSource(slug: string): Promise<void> {
   await fs.unlink(metaPath).catch(() => {});
 
   await updateSourcesIndex();
+  await updateWikiIndex(await listSources());
+  await appendWikiLog('delete', slug);
   sendToRenderer(IpcChannels.Sources.Changed);
 }

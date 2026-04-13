@@ -116,6 +116,9 @@ const api: MystApi = {
       };
     },
   },
+  wiki: {
+    graph: () => ipcRenderer.invoke(IpcChannels.Wiki.Graph),
+  },
 };
 
 contextBridge.exposeInMainWorld('myst', api);

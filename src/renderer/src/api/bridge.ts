@@ -9,6 +9,7 @@ const EXPECTED_NAMESPACES = [
   'sources',
   'comments',
   'pendingEdits',
+  'wiki',
 ] as const;
 
 function getApi(): MystApi {
@@ -55,5 +56,8 @@ export const bridge: MystApi = {
   },
   get pendingEdits() {
     return getApi().pendingEdits;
+  },
+  get wiki() {
+    return getApi().wiki;
   },
 } as MystApi;

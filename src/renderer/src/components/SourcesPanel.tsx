@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SourceMeta } from '@shared/types';
 import { useSourcePreview } from '../store/sourcePreview';
 import { bridge } from '../api/bridge';
+import { WikiGraphModal } from './WikiGraphModal';
 
 type AddMode = null | 'options' | 'paste';
 
@@ -9,6 +10,7 @@ export function SourcesPanel(): JSX.Element {
   const [sources, setSources] = useState<SourceMeta[]>([]);
   const [ingesting, setIngesting] = useState(false);
   const [showAddPopup, setShowAddPopup] = useState(false);
+  const [showGraph, setShowGraph] = useState(false);
   const openPreview = useSourcePreview((s) => s.open);
 
   const loadSources = useCallback(() => {
@@ -28,7 +30,20 @@ export function SourcesPanel(): JSX.Element {
 
   return (
     <div className="sources-panel">
-      <h2>Sources</h2>
+      <div className="sources-panel-header">
+        <h2>Sources</h2>
+        {sources.length > 0 && (
+          <button
+            type="button"
+            className="wiki-graph-trigger"
+            onClick={() => setShowGraph(true)}
+            title="Show research wiki graph"
+            aria-label="Show research wiki graph"
+          >
+            &#x25CE;
+          </button>
+        )}
+      </div>
 
       {sources.length > 0 && (
         <div className="source-list-scroll">
@@ -82,6 +97,8 @@ export function SourcesPanel(): JSX.Element {
           onDone={() => setIngesting(false)}
         />
       )}
+
+      {showGraph && <WikiGraphModal onClose={() => setShowGraph(false)} />}
     </div>
   );
 }

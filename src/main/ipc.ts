@@ -10,6 +10,7 @@ import { closeProject, createNewProject, getCurrentProject, openProject } from '
 import { createDocument, deleteDocument, listDocuments, readDocument, writeDocument } from './document';
 import { clearHistory, loadHistory, sendMessage } from './chat';
 import { deleteSource, ingestSources, ingestText, listSources, pickSourceFiles, readSource } from './sources';
+import { computeWikiGraph } from './wiki';
 import { createComment, deleteComment, listComments } from './comments';
 import {
   acceptPendingEdit,
@@ -196,5 +197,11 @@ export function registerIpcHandlers(): void {
       throw new Error('Source slug must be a non-empty string.');
     }
     await deleteSource(slug.trim());
+  });
+
+  // Wiki
+  ipcMain.handle(IpcChannels.Wiki.Graph, async () => {
+    const sources = await listSources();
+    return computeWikiGraph(sources);
   });
 }

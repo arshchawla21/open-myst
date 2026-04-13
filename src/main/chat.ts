@@ -16,6 +16,7 @@ import {
   type EditOp,
 } from './editLogic';
 import { log, logError } from './log';
+import { readWikiIndex } from './wiki';
 import type { PendingEdit } from '@shared/types';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -183,7 +184,7 @@ export async function sendMessage(
   const agentPrompt = await readProjectFile('agent.md');
   const docPath = `documents/${activeDocument}`;
   const document = await readProjectFile(docPath);
-  const sourcesIndex = await readProjectFile('sources/index.md');
+  const wikiIndex = await readWikiIndex();
 
   const docLabel = activeDocument.replace(/\.md$/, '');
 
@@ -208,7 +209,7 @@ export async function sendMessage(
       agentPrompt,
       docPath,
       document,
-      sourcesIndex,
+      wikiIndex,
       docLabel,
       activeDocument,
       userText,
@@ -237,7 +238,7 @@ interface TurnContext {
   agentPrompt: string;
   docPath: string;
   document: string;
-  sourcesIndex: string;
+  wikiIndex: string;
   docLabel: string;
   activeDocument: string;
   userText: string;
@@ -251,7 +252,7 @@ async function runTurn(ctx: TurnContext): Promise<ChatMessage> {
     agentPrompt,
     docPath,
     document,
-    sourcesIndex,
+    wikiIndex,
     docLabel,
     activeDocument,
     userText,
@@ -299,8 +300,11 @@ async function runTurn(ctx: TurnContext): Promise<ChatMessage> {
     `\n\n[Active document: ${docLabel}]`,
     `\n\n========== BEGIN ${activeDocument} ==========\n` + document + `\n========== END ${activeDocument} ==========`,
     pendingBlock,
-    sourcesIndex.trim()
-      ? '\n\n========== BEGIN sources/index.md (READ-ONLY, not part of the document) ==========\n' + sourcesIndex + '\n========== END sources/index.md =========='
+    wikiIndex.trim()
+      ? '\n\n========== BEGIN research wiki index (.myst/wiki/index.md — your default memory surface) ==========\n' +
+        wikiIndex +
+        '\n========== END research wiki index ==========\n' +
+        'This index is loaded every turn. Treat it as the map of what you already know: consult it before answering, and open the source pages (sources/<slug>.md) it points at when you need the full text. Do not ask the user to attach sources that are already here.'
       : '',
   ].join('');
 
