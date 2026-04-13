@@ -1,5 +1,7 @@
 # Open Myst
 
+An open-source desktop research companion.
+
 ![image](res/preview.png)
 
 A desktop writing and research companion. You write in a markdown editor, an LLM agent reads alongside you and proposes edits as inline diffs you accept or reject one at a time. The agent maintains a research wiki on disk that it consults every turn — drop in PDFs, paste articles, and the wiki grows into a project memory you can grep, browse, or visualise as a graph.
@@ -67,4 +69,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: open an issue first i
 
 ## License
 
-TBD — to be added before we tag a release.
+See [LICENSE](LICENSE.md)
