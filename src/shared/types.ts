@@ -50,3 +50,34 @@ export interface DocumentFile {
   filename: string;
   label: string;
 }
+
+export interface ThreadMessage {
+  role: ChatRole;
+  content: string;
+  timestamp: string;
+}
+
+export type CommentState = 'open' | 'resolved' | 'orphaned';
+
+export interface Comment {
+  id: string;
+  docFilename: string;
+  text: string;
+  contextBefore: string;
+  contextAfter: string;
+  message: string;
+  thread: ThreadMessage[];
+  state: CommentState;
+  createdAt: string;
+  resolvedBy?: string;
+}
+
+export interface PendingEdit {
+  id: string;
+  docFilename: string;
+  oldString: string;
+  newString: string;
+  occurrence: number;
+  fromComment?: string;
+  createdAt: string;
+}

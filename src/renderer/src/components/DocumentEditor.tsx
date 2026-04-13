@@ -23,6 +23,13 @@ import { useHeadings } from '../store/headings';
 import { useMystLinkHandler } from '../hooks/useMystLinkHandler';
 import { useDocuments } from '../store/documents';
 import { useSourcePreview } from '../store/sourcePreview';
+import { usePendingEdits } from '../store/pendingEdits';
+import { useComments } from '../store/comments';
+import { createPendingEditsExtension, pendingEditsKey } from '../tiptap/pendingEditPlugin';
+import { createCommentHighlightExtension, commentHighlightKey } from '../tiptap/commentHighlightPlugin';
+import { PendingEditsBanner } from './PendingEditsBanner';
+import { CommentFloatingButton } from './CommentFloatingButton';
+import { CommentsPanel } from './CommentsPanel';
 import type { Heading } from '@shared/types';
 import type { Editor } from '@tiptap/core';
 
@@ -141,20 +148,24 @@ function extractHeadings(editor: Editor): Heading[] {
 
 interface TiptapEditorProps {
   initialValue: string;
+  editable: boolean;
   onMarkdownChange: (md: string) => void;
   onEditorReady: (editor: Editor) => void;
   onLinkClick: LinkClickCallback;
 }
 
-function TiptapEditor({ initialValue, onMarkdownChange, onEditorReady, onLinkClick }: TiptapEditorProps): JSX.Element {
+function TiptapEditor({ initialValue, editable, onMarkdownChange, onEditorReady, onLinkClick }: TiptapEditorProps): JSX.Element {
   const onChangeRef = useRef(onMarkdownChange);
   onChangeRef.current = onMarkdownChange;
   const onLinkClickRef = useRef(onLinkClick);
   onLinkClickRef.current = onLinkClick;
 
   const [linkPlugin] = useState(() => createMystLinkClickPlugin((href) => onLinkClickRef.current(href)));
+  const [pendingPlugin] = useState(() => createPendingEditsExtension());
+  const [commentPlugin] = useState(() => createCommentHighlightExtension());
 
   const editor = useEditor({
+    editable,
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3, 4] },
@@ -172,6 +183,8 @@ function TiptapEditor({ initialValue, onMarkdownChange, onEditorReady, onLinkCli
       MarkdownBlockPaste,
       FindHighlight,
       linkPlugin,
+      pendingPlugin,
+      commentPlugin,
       Markdown.configure({
         html: false,
         transformPastedText: true,
@@ -187,8 +200,11 @@ function TiptapEditor({ initialValue, onMarkdownChange, onEditorReady, onLinkCli
   });
 
   useEffect(() => {
-    if (editor) onEditorReady(editor);
-  }, [editor, onEditorReady]);
+    if (editor) {
+      editor.setEditable(editable);
+      onEditorReady(editor);
+    }
+  }, [editor, editable, onEditorReady]);
 
   return <EditorContent editor={editor} className="tiptap-content" />;
 }
@@ -212,6 +228,12 @@ export function DocumentEditor({ projectPath, activeFile }: DocumentEditorProps)
   const openPreview = useSourcePreview((s) => s.open);
   useMystLinkHandler();
   const prevHeadingsJson = useRef('');
+
+  const pendingStore = usePendingEdits();
+  const commentsStore = useComments();
+  const pendingEdits = pendingStore.edits;
+  const comments = commentsStore.comments;
+  const editorLocked = pendingEdits.length > 0;
 
   const handleLinkClick = useCallback((href: string) => {
     if (!href.endsWith('.md')) return;
@@ -282,6 +304,89 @@ export function DocumentEditor({ projectPath, activeFile }: DocumentEditorProps)
     return off;
   }, [activeFile]);
 
+  useEffect(() => {
+    if (!activeFile) return;
+    void pendingStore.load(activeFile);
+    void commentsStore.load(activeFile);
+  }, [activeFile, pendingStore.load, commentsStore.load]);
+
+  useEffect(() => {
+    const offPending = bridge.pendingEdits.onChanged(() => {
+      const doc = activeFileRefInner.current;
+      if (doc) void usePendingEdits.getState().load(doc);
+    });
+    const offComments = bridge.comments.onChanged(() => {
+      const doc = activeFileRefInner.current;
+      if (doc) void useComments.getState().load(doc);
+    });
+    return () => {
+      offPending();
+      offComments();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!editor) return;
+    const tr = editor.state.tr.setMeta(pendingEditsKey, pendingEdits);
+    editor.view.dispatch(tr);
+  }, [editor, pendingEdits, contentVersion]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const tr = editor.state.tr.setMeta(commentHighlightKey, comments);
+    editor.view.dispatch(tr);
+  }, [editor, comments, contentVersion]);
+
+  const handleAcceptPending = useCallback(async (id: string) => {
+    try {
+      await usePendingEdits.getState().accept(id);
+    } catch (err) {
+      console.error('accept pending failed', err);
+    }
+  }, []);
+
+  const handleRejectPending = useCallback(async (id: string) => {
+    try {
+      await usePendingEdits.getState().reject(id);
+    } catch (err) {
+      console.error('reject pending failed', err);
+    }
+  }, []);
+
+  const handleDiscussPending = useCallback((id: string) => {
+    const edit = usePendingEdits.getState().edits.find((e) => e.id === id);
+    if (edit?.fromComment) {
+      useComments.getState().setExpanded(edit.fromComment);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!editor) return;
+    const viewDom = editor.view.dom as HTMLElement;
+    const handler = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement;
+      const btn = target.closest('[data-pending-action]') as HTMLElement | null;
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const action = btn.dataset['pendingAction'];
+      const id = btn.dataset['pendingId'];
+      if (!id) return;
+      if (action === 'accept') void handleAcceptPending(id);
+      else if (action === 'reject') void handleRejectPending(id);
+      else if (action === 'discuss') handleDiscussPending(id);
+    };
+    viewDom.addEventListener('mousedown', handler, true);
+    viewDom.addEventListener('click', handler, true);
+    return () => {
+      viewDom.removeEventListener('mousedown', handler, true);
+      viewDom.removeEventListener('click', handler, true);
+    };
+  }, [editor, handleAcceptPending, handleRejectPending, handleDiscussPending]);
+
+  const activeFileRefInner = useRef(activeFile);
+  activeFileRefInner.current = activeFile;
+
   const syncHeadings = useCallback(() => {
     if (!editor) return;
     const headings = extractHeadings(editor);
@@ -339,6 +444,10 @@ export function DocumentEditor({ projectPath, activeFile }: DocumentEditorProps)
     setEditor(ed);
   }, []);
 
+  const handleClearAllPending = useCallback(() => {
+    void usePendingEdits.getState().clearAll();
+  }, []);
+
   const surfaceStyle = { '--doc-font-size': `${fontSize}px` } as CSSProperties;
 
   if (loadError) {
@@ -363,16 +472,22 @@ export function DocumentEditor({ projectPath, activeFile }: DocumentEditorProps)
     <div className="document-editor" style={surfaceStyle}>
       <EditorToolbar editor={editor} fontSize={fontSize} onFontSize={setFontSize} />
       {showFind && <FindBar editor={editor} onClose={() => setShowFind(false)} />}
-      <div className="document-scroll">
-        <div className="document-page">
-          <TiptapEditor
-            key={`${projectPath}-${activeFile}-${contentVersion}`}
-            initialValue={initialValue}
-            onMarkdownChange={scheduleSave}
-            onEditorReady={handleEditorReady}
-            onLinkClick={handleLinkClick}
-          />
+      <PendingEditsBanner count={pendingEdits.length} onClearAll={handleClearAllPending} />
+      <div className={`document-body ${editorLocked ? 'document-locked' : ''}`}>
+        <div className="document-scroll">
+          <div className="document-page">
+            <TiptapEditor
+              key={`${projectPath}-${activeFile}-${contentVersion}`}
+              initialValue={initialValue}
+              editable={!editorLocked}
+              onMarkdownChange={scheduleSave}
+              onEditorReady={handleEditorReady}
+              onLinkClick={handleLinkClick}
+            />
+          </div>
+          <CommentFloatingButton editor={editor} disabled={editorLocked} />
         </div>
+        <CommentsPanel activeFile={activeFile} />
       </div>
       <SaveIndicator status={status} />
     </div>

@@ -8,8 +8,22 @@ import {
 } from './settings';
 import { closeProject, createNewProject, getCurrentProject, openProject } from './projects';
 import { createDocument, deleteDocument, listDocuments, readDocument, writeDocument } from './document';
-import { clearHistory, loadHistory, sendMessage } from './chat';
+import { actionComments, clearHistory, loadHistory, sendMessage, sendMessageInCommentThread } from './chat';
 import { deleteSource, ingestSources, ingestText, listSources, pickSourceFiles, readSource } from './sources';
+import {
+  createComment,
+  deleteComment,
+  listComments,
+  reopenComment,
+  resolveComment,
+  updateComment,
+} from './comments';
+import {
+  acceptPendingEdit,
+  clearPendingEdits,
+  listPendingEdits,
+  rejectPendingEdit,
+} from './pendingEdits';
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannels.Settings.Get, () => getSettings());
@@ -88,8 +102,87 @@ export function registerIpcHandlers(): void {
     }
     return sendMessage(message.trim(), activeDocument.trim());
   });
+  ipcMain.handle(IpcChannels.Chat.SendInCommentThread, async (_event, commentId: unknown, message: unknown) => {
+    if (typeof commentId !== 'string' || commentId.trim().length === 0) {
+      throw new Error('commentId must be a non-empty string.');
+    }
+    if (typeof message !== 'string' || message.trim().length === 0) {
+      throw new Error('Message must be a non-empty string.');
+    }
+    return sendMessageInCommentThread(commentId.trim(), message.trim());
+  });
+  ipcMain.handle(IpcChannels.Chat.ActionComments, async (_event, ids: unknown, activeDocument: unknown) => {
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) {
+      throw new Error('commentIds must be an array of strings.');
+    }
+    if (typeof activeDocument !== 'string' || activeDocument.trim().length === 0) {
+      throw new Error('Active document must be specified.');
+    }
+    return actionComments(ids as string[], activeDocument.trim());
+  });
   ipcMain.handle(IpcChannels.Chat.History, () => loadHistory());
   ipcMain.handle(IpcChannels.Chat.Clear, () => clearHistory());
+
+  // Comments
+  ipcMain.handle(IpcChannels.Comments.List, (_event, docFilename: unknown) => {
+    if (typeof docFilename !== 'string' || docFilename.trim().length === 0) {
+      throw new Error('docFilename must be a non-empty string.');
+    }
+    return listComments(docFilename.trim());
+  });
+  ipcMain.handle(IpcChannels.Comments.Create, async (_event, docFilename: unknown, data: unknown) => {
+    if (typeof docFilename !== 'string' || docFilename.trim().length === 0) {
+      throw new Error('docFilename must be a non-empty string.');
+    }
+    const d = data as { text?: string; contextBefore?: string; contextAfter?: string; message?: string };
+    if (!d || typeof d.text !== 'string' || typeof d.message !== 'string') {
+      throw new Error('Invalid comment data.');
+    }
+    return createComment(docFilename.trim(), {
+      text: d.text,
+      contextBefore: d.contextBefore ?? '',
+      contextAfter: d.contextAfter ?? '',
+      message: d.message,
+    });
+  });
+  ipcMain.handle(IpcChannels.Comments.Update, async (_event, id: unknown, changes: unknown) => {
+    if (typeof id !== 'string') throw new Error('Comment id must be a string.');
+    return updateComment(id, (changes ?? {}) as Parameters<typeof updateComment>[1]);
+  });
+  ipcMain.handle(IpcChannels.Comments.Delete, async (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('Comment id must be a string.');
+    await deleteComment(id);
+  });
+  ipcMain.handle(IpcChannels.Comments.Resolve, async (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('Comment id must be a string.');
+    await resolveComment(id);
+  });
+  ipcMain.handle(IpcChannels.Comments.Reopen, async (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('Comment id must be a string.');
+    await reopenComment(id);
+  });
+
+  // Pending edits
+  ipcMain.handle(IpcChannels.PendingEdits.List, (_event, docFilename: unknown) => {
+    if (typeof docFilename !== 'string' || docFilename.trim().length === 0) {
+      throw new Error('docFilename must be a non-empty string.');
+    }
+    return listPendingEdits(docFilename.trim());
+  });
+  ipcMain.handle(IpcChannels.PendingEdits.Accept, async (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('Pending edit id must be a string.');
+    await acceptPendingEdit(id);
+  });
+  ipcMain.handle(IpcChannels.PendingEdits.Reject, async (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('Pending edit id must be a string.');
+    await rejectPendingEdit(id);
+  });
+  ipcMain.handle(IpcChannels.PendingEdits.Clear, async (_event, docFilename: unknown) => {
+    if (typeof docFilename !== 'string' || docFilename.trim().length === 0) {
+      throw new Error('docFilename must be a non-empty string.');
+    }
+    await clearPendingEdits(docFilename.trim());
+  });
 
   // Sources
   ipcMain.handle(IpcChannels.Sources.Ingest, async (_event, filePaths: unknown) => {

@@ -28,7 +28,11 @@ You have a tool called \`myst_edit\`. ALL document changes MUST go through it. Y
 ### Rules for old_string
 - Must match EXACTLY ONE place in the document. Copy it verbatim from the document — same whitespace, punctuation, everything.
 - Keep it as SHORT as possible. For a word change, just the sentence. Never paste the whole document.
-- If it matches zero or multiple times, the system will reject it and ask you to retry with a more specific or corrected snippet.
+- If it matches zero times, the system will reject it and ask you to retry with a corrected snippet.
+- If it matches multiple times, either make it more specific OR add an \`"occurrence"\` field (1-indexed) picking which match you meant:
+  \`\`\`myst_edit
+  { "old_string": "the cat", "new_string": "the dog", "occurrence": 2 }
+  \`\`\`
 - old_string must ONLY come from the active document. Never include sources, agent instructions, or other context.
 
 ### Appending new content
@@ -137,6 +141,8 @@ async function scaffoldProject(root: string, name: string): Promise<ProjectMeta>
   await fs.mkdir(join(root, 'documents'), { recursive: true });
   await fs.mkdir(join(root, 'sources'), { recursive: true });
   await fs.mkdir(join(root, '.myst', 'diffs'), { recursive: true });
+  await fs.mkdir(join(root, '.myst', 'comments'), { recursive: true });
+  await fs.mkdir(join(root, '.myst', 'pending'), { recursive: true });
 
   const meta: ProjectMeta = {
     name,

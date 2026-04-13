@@ -3,9 +3,11 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { BrowserWindow } from 'electron';
 import { IpcChannels } from '@shared/ipc-channels';
-import type { ChatMessage } from '@shared/types';
+import type { ChatMessage, Comment, ThreadMessage } from '@shared/types';
 import { getCurrentProject } from './projects';
 import { getOpenRouterKey, getSettings } from './settings';
+import { addPendingEdits } from './pendingEdits';
+import { addThreadMessage, getComment, getCommentsByIds } from './comments';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -116,12 +118,7 @@ async function streamCompletion(
 interface EditOp {
   old_string: string;
   new_string: string;
-}
-
-interface ApplyResult {
-  ok: boolean;
-  error?: string;
-  index: number;
+  occurrence?: number;
 }
 
 function extractEdits(text: string): { edits: EditOp[]; chatContent: string } {
@@ -133,12 +130,20 @@ function extractEdits(text: string): { edits: EditOp[]; chatContent: string } {
   while ((match = regex.exec(text)) !== null) {
     try {
       const raw = match[1]!.trim();
-      const parsed = JSON.parse(raw) as { old_string?: string; new_string?: string };
+      const parsed = JSON.parse(raw) as {
+        old_string?: string;
+        new_string?: string;
+        occurrence?: number;
+      };
       if (typeof parsed.old_string === 'string' && typeof parsed.new_string === 'string') {
-        edits.push({
+        const op: EditOp = {
           old_string: parsed.old_string,
           new_string: parsed.new_string,
-        });
+        };
+        if (typeof parsed.occurrence === 'number' && parsed.occurrence > 0) {
+          op.occurrence = parsed.occurrence;
+        }
+        edits.push(op);
       }
     } catch {
       console.log('[myst-chat] failed to parse myst_edit JSON:', match[1]);
@@ -150,24 +155,44 @@ function extractEdits(text: string): { edits: EditOp[]; chatContent: string } {
   return { edits, chatContent };
 }
 
-function applyEdit(doc: string, edit: EditOp): ApplyResult & { doc: string } {
-  if (edit.old_string === '') {
-    const trimmed = doc.trimEnd();
-    return { ok: true, index: 0, doc: trimmed + '\n\n' + edit.new_string + '\n' };
-  }
+interface LocateResult {
+  ok: boolean;
+  count: number;
+  contexts: string[];
+}
 
-  const first = doc.indexOf(edit.old_string);
-  if (first === -1) {
-    return { ok: false, error: 'old_string not found in document', index: 0, doc };
+function locateEdit(doc: string, edit: EditOp): LocateResult {
+  if (edit.old_string === '') return { ok: true, count: 1, contexts: [] };
+  const contexts: string[] = [];
+  let searchFrom = 0;
+  while (true) {
+    const idx = doc.indexOf(edit.old_string, searchFrom);
+    if (idx === -1) break;
+    const start = Math.max(0, idx - 20);
+    const end = Math.min(doc.length, idx + edit.old_string.length + 20);
+    contexts.push(doc.slice(start, end).replace(/\n/g, ' '));
+    searchFrom = idx + edit.old_string.length;
   }
+  return { ok: contexts.length === 1, count: contexts.length, contexts };
+}
 
-  const second = doc.indexOf(edit.old_string, first + 1);
-  if (second !== -1) {
-    return { ok: false, error: 'old_string matches multiple locations — make it more specific', index: 0, doc };
+function validateEdits(doc: string, edits: EditOp[]): { ok: boolean; failures: string[] } {
+  const failures: string[] = [];
+  for (let i = 0; i < edits.length; i++) {
+    const edit = edits[i]!;
+    if (edit.old_string === '') continue;
+    const loc = locateEdit(doc, edit);
+    if (loc.count === 0) {
+      failures.push(`Edit ${i}: old_string not found. old_string: "${edit.old_string.slice(0, 80)}"`);
+    } else if (loc.count > 1) {
+      if (edit.occurrence && edit.occurrence >= 1 && edit.occurrence <= loc.count) continue;
+      const ctxList = loc.contexts.map((c, j) => `  ${j + 1}. "${c}"`).join('\n');
+      failures.push(
+        `Edit ${i}: old_string matches ${loc.count} places. Re-emit with an "occurrence" field set to 1-${loc.count}.\nMatches:\n${ctxList}`,
+      );
+    }
   }
-
-  const newDoc = doc.slice(0, first) + edit.new_string + doc.slice(first + edit.old_string.length);
-  return { ok: true, index: first, doc: newDoc };
+  return { ok: failures.length === 0, failures };
 }
 
 const CHANGE_WORDS = /\b(changed|updated|switched|swapped|renamed|replaced|tweaked|edited|modified|added|wrote|dropped|inserted|promotion|start|here'?s)\b/i;
@@ -186,6 +211,27 @@ function cleanChatContent(text: string): string {
     .replace(/new_string/g, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+async function stageEdits(
+  docFilename: string,
+  edits: EditOp[],
+  fromComment?: string,
+): Promise<number> {
+  if (edits.length === 0) return 0;
+  await addPendingEdits(
+    docFilename,
+    edits.map((e) => {
+      const entry: { oldString: string; newString: string; occurrence?: number; fromComment?: string } = {
+        oldString: e.old_string,
+        newString: e.new_string,
+      };
+      if (e.occurrence !== undefined) entry.occurrence = e.occurrence;
+      if (fromComment !== undefined) entry.fromComment = fromComment;
+      return entry;
+    }),
+  );
+  return edits.length;
 }
 
 export async function sendMessage(userText: string, activeDocument: string): Promise<ChatMessage> {
@@ -229,13 +275,9 @@ export async function sendMessage(userText: string, activeDocument: string): Pro
   const fullContent = await streamCompletion(apiKey, model, messages, true);
   sendToRenderer(IpcChannels.Chat.ChunkDone);
 
-  console.log('[myst-chat] full LLM response:\n', fullContent);
-
   let { edits, chatContent } = extractEdits(fullContent);
-  console.log('[myst-chat] extracted edits:', edits.length);
 
   if (edits.length === 0 && looksLikeDocumentRequest(userText, fullContent)) {
-    console.log('[myst-chat] no edits found but looks like a document change — retrying');
     const doc = await readProjectFile(docPath);
     const retryMessages = [
       ...messages,
@@ -246,7 +288,6 @@ export async function sendMessage(userText: string, activeDocument: string): Pro
       },
     ];
     const retryContent = await streamCompletion(apiKey, model, retryMessages, false);
-    console.log('[myst-chat] retry response:\n', retryContent);
     const retryResult = extractEdits(retryContent);
     if (retryResult.edits.length > 0) {
       edits = retryResult.edits;
@@ -254,68 +295,226 @@ export async function sendMessage(userText: string, activeDocument: string): Pro
     }
   }
 
-  let madeChanges = false;
-
   if (edits.length > 0) {
-    let doc = await readProjectFile(docPath);
-    console.log('[myst-chat] document before:', JSON.stringify(doc.slice(0, 300)));
-
-    const failures: string[] = [];
-
-    for (let i = 0; i < edits.length; i++) {
-      const edit = edits[i]!;
-      console.log('[myst-chat] applying edit', i, 'old:', JSON.stringify(edit.old_string.slice(0, 100)));
-      const result = applyEdit(doc, edit);
-      if (result.ok) {
-        doc = result.doc;
-        madeChanges = true;
-        console.log('[myst-chat] edit', i, 'applied successfully');
-      } else {
-        console.log('[myst-chat] edit', i, 'FAILED:', result.error);
-        failures.push(`Edit ${i}: ${result.error} (old_string: "${edit.old_string.slice(0, 60)}...")`);
-      }
-    }
-
-    if (failures.length > 0) {
-      console.log('[myst-chat] retrying failed edits...');
-      const freshDoc = madeChanges ? doc : await readProjectFile(docPath);
+    const validation = validateEdits(document, edits);
+    if (!validation.ok) {
       const retryMessages = [
         ...messages,
         { role: 'assistant', content: fullContent },
         {
           role: 'user',
-          content: `Some edits failed:\n${failures.join('\n')}\n\nHere is the current document:\n\n${freshDoc}\n\nPlease retry the failed edits with corrected old_string values that match exactly once.`,
+          content: `Some edits could not be located unambiguously:\n${validation.failures.join('\n\n')}\n\nRe-emit the failed myst_edit blocks with a more specific old_string, or add an "occurrence" field to pick which match you meant.`,
         },
       ];
       const retryContent = await streamCompletion(apiKey, model, retryMessages, false);
-      console.log('[myst-chat] retry response:\n', retryContent);
       const retryResult = extractEdits(retryContent);
-      for (let i = 0; i < retryResult.edits.length; i++) {
-        const result = applyEdit(doc, retryResult.edits[i]!);
-        if (result.ok) {
-          doc = result.doc;
-          madeChanges = true;
-          console.log('[myst-chat] retry edit', i, 'applied successfully');
-        } else {
-          console.log('[myst-chat] retry edit', i, 'FAILED again:', result.error);
+      if (retryResult.edits.length > 0) {
+        const retryValidation = validateEdits(document, retryResult.edits);
+        if (retryValidation.ok) {
+          edits = retryResult.edits;
         }
       }
     }
-
-    if (madeChanges) {
-      console.log('[myst-chat] document after:', JSON.stringify(doc.slice(0, 300)));
-      await fs.writeFile(projectPath(docPath), doc, 'utf-8');
-      sendToRenderer(IpcChannels.Document.Changed);
-    }
   }
 
-  let finalChat = madeChanges ? (chatContent || 'Document updated.') : fullContent;
+  const staged = await stageEdits(activeDocument, edits);
+
+  let finalChat = staged > 0 ? (chatContent || 'Ready to review — check the pending edits.') : fullContent;
   finalChat = cleanChatContent(finalChat);
 
   const assistantMsg: ChatMessage = {
     id: randomUUID(),
     role: 'assistant',
-    content: finalChat || 'Document updated.',
+    content: finalChat || (staged > 0 ? `Staged ${staged} edit${staged === 1 ? '' : 's'} for review.` : ''),
+    timestamp: new Date().toISOString(),
+  };
+  await appendMessage(assistantMsg);
+
+  return assistantMsg;
+}
+
+function buildCommentSystemPrompt(
+  agentPrompt: string,
+  docFilename: string,
+  document: string,
+  comment: Comment,
+): string {
+  const docLabel = docFilename.replace(/\.md$/, '');
+  return [
+    agentPrompt,
+    `\n\n[Active document: ${docLabel}]`,
+    `\n\n[Scoped comment-thread mode]`,
+    `\nYou are responding to a single inline comment on a specific passage. The user may ask a question about the passage or request a change.`,
+    `\nIf they ask for a change, emit myst_edit block(s) as usual. If they ask a question, answer briefly in chat.`,
+    `\n\n========== COMMENTED PASSAGE ==========\n${comment.text}\n========== END PASSAGE ==========`,
+    `\n\nThe user's original comment: ${comment.message}`,
+    `\n\n========== BEGIN ${docFilename} ==========\n${document}\n========== END ${docFilename} ==========`,
+  ].join('');
+}
+
+export async function sendMessageInCommentThread(
+  commentId: string,
+  userText: string,
+): Promise<ThreadMessage> {
+  const apiKey = await getOpenRouterKey();
+  if (!apiKey) throw new Error('OpenRouter API key not set. Add it in Settings.');
+
+  const comment = await getComment(commentId);
+  if (!comment) throw new Error('Comment not found.');
+
+  const settings = await getSettings();
+  const model = settings.defaultModel;
+
+  const agentPrompt = await readProjectFile('agent.md');
+  const docPath = `documents/${comment.docFilename}`;
+  const document = await readProjectFile(docPath);
+
+  const userThreadMsg: ThreadMessage = {
+    role: 'user',
+    content: userText,
+    timestamp: new Date().toISOString(),
+  };
+  await addThreadMessage(commentId, userThreadMsg);
+
+  const systemContent = buildCommentSystemPrompt(agentPrompt, comment.docFilename, document, comment);
+  const threadHistory = [...comment.thread, userThreadMsg];
+
+  const messages: Array<{ role: string; content: string }> = [
+    { role: 'system', content: systemContent },
+    ...threadHistory.map((m) => ({ role: m.role, content: m.content })),
+  ];
+
+  const fullContent = await streamCompletion(apiKey, model, messages, true);
+  sendToRenderer(IpcChannels.Chat.ChunkDone);
+
+  let { edits, chatContent } = extractEdits(fullContent);
+
+  if (edits.length > 0) {
+    const validation = validateEdits(document, edits);
+    if (!validation.ok) {
+      const retryMessages = [
+        ...messages,
+        { role: 'assistant', content: fullContent },
+        {
+          role: 'user',
+          content: `Some edits could not be located unambiguously:\n${validation.failures.join('\n\n')}\n\nRe-emit the failed myst_edit blocks with a more specific old_string, or add an "occurrence" field to pick which match you meant.`,
+        },
+      ];
+      const retryContent = await streamCompletion(apiKey, model, retryMessages, false);
+      const retryResult = extractEdits(retryContent);
+      if (retryResult.edits.length > 0) {
+        const retryValidation = validateEdits(document, retryResult.edits);
+        if (retryValidation.ok) {
+          edits = retryResult.edits;
+          if (!chatContent) chatContent = retryResult.chatContent;
+        }
+      }
+    }
+  }
+
+  await stageEdits(comment.docFilename, edits, comment.id);
+
+  const finalChat = cleanChatContent(chatContent || fullContent) || (edits.length > 0 ? `Staged ${edits.length} edit${edits.length === 1 ? '' : 's'} for review.` : '');
+
+  const assistantThreadMsg: ThreadMessage = {
+    role: 'assistant',
+    content: finalChat,
+    timestamp: new Date().toISOString(),
+  };
+  await addThreadMessage(commentId, assistantThreadMsg);
+
+  return assistantThreadMsg;
+}
+
+export async function actionComments(
+  commentIds: string[],
+  activeDocument: string,
+): Promise<ChatMessage> {
+  const apiKey = await getOpenRouterKey();
+  if (!apiKey) throw new Error('OpenRouter API key not set. Add it in Settings.');
+
+  const comments = await getCommentsByIds(commentIds);
+  if (comments.length === 0) throw new Error('No comments to action.');
+
+  const settings = await getSettings();
+  const model = settings.defaultModel;
+
+  const agentPrompt = await readProjectFile('agent.md');
+  const docPath = `documents/${activeDocument}`;
+  const document = await readProjectFile(docPath);
+  const docLabel = activeDocument.replace(/\.md$/, '');
+
+  const commentSummary = comments
+    .map(
+      (c, i) =>
+        `Comment ${i + 1} [id: ${c.id}]:\n  Passage: "${c.text}"\n  Note: ${c.message}`,
+    )
+    .join('\n\n');
+
+  const userPromptText = `Please action these inline comments on the document. For each comment, emit myst_edit block(s) that address what the user asked for. If a comment is a question rather than a change request, include a short answer for it in your chat reply instead of an edit.\n\n${commentSummary}`;
+
+  const userMsg: ChatMessage = {
+    id: randomUUID(),
+    role: 'user',
+    content: `Action ${comments.length} comment${comments.length === 1 ? '' : 's'}.`,
+    timestamp: new Date().toISOString(),
+  };
+  await appendMessage(userMsg);
+
+  const history = await loadHistory();
+
+  const systemContent = [
+    agentPrompt,
+    `\n\n[Active document: ${docLabel}]`,
+    `\n\n========== BEGIN ${activeDocument} ==========\n${document}\n========== END ${activeDocument} ==========`,
+  ].join('');
+
+  const messages: Array<{ role: string; content: string }> = [
+    { role: 'system', content: systemContent },
+    ...history.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user', content: userPromptText },
+  ];
+
+  const fullContent = await streamCompletion(apiKey, model, messages, true);
+  sendToRenderer(IpcChannels.Chat.ChunkDone);
+
+  let { edits, chatContent } = extractEdits(fullContent);
+
+  if (edits.length > 0) {
+    const validation = validateEdits(document, edits);
+    if (!validation.ok) {
+      const retryMessages = [
+        ...messages,
+        { role: 'assistant', content: fullContent },
+        {
+          role: 'user',
+          content: `Some edits could not be located unambiguously:\n${validation.failures.join('\n\n')}\n\nRe-emit the failed myst_edit blocks with a more specific old_string, or add an "occurrence" field to pick which match you meant.`,
+        },
+      ];
+      const retryContent = await streamCompletion(apiKey, model, retryMessages, false);
+      const retryResult = extractEdits(retryContent);
+      if (retryResult.edits.length > 0) {
+        const retryValidation = validateEdits(document, retryResult.edits);
+        if (retryValidation.ok) {
+          edits = retryResult.edits;
+        }
+      }
+    }
+  }
+
+  // Stage with comment linkage: match edits to comments by substring of old_string
+  for (const edit of edits) {
+    const linked = comments.find((c) => edit.old_string.includes(c.text) || c.text.includes(edit.old_string));
+    await stageEdits(activeDocument, [edit], linked?.id);
+  }
+
+  const staged = edits.length;
+  const finalChat = cleanChatContent(chatContent || fullContent) || (staged > 0 ? `Staged ${staged} edit${staged === 1 ? '' : 's'} for review.` : '');
+
+  const assistantMsg: ChatMessage = {
+    id: randomUUID(),
+    role: 'assistant',
+    content: finalChat,
     timestamp: new Date().toISOString(),
   };
   await appendMessage(assistantMsg);

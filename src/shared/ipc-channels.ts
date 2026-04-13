@@ -25,10 +25,28 @@ export const IpcChannels = {
   },
   Chat: {
     Send: 'chat:send',
+    SendInCommentThread: 'chat:send-in-comment-thread',
+    ActionComments: 'chat:action-comments',
     History: 'chat:history',
     Clear: 'chat:clear',
     Chunk: 'chat:chunk',
     ChunkDone: 'chat:chunk-done',
+  },
+  Comments: {
+    List: 'comments:list',
+    Create: 'comments:create',
+    Update: 'comments:update',
+    Delete: 'comments:delete',
+    Resolve: 'comments:resolve',
+    Reopen: 'comments:reopen',
+    Changed: 'comments:changed',
+  },
+  PendingEdits: {
+    List: 'pending-edits:list',
+    Accept: 'pending-edits:accept',
+    Reject: 'pending-edits:reject',
+    Clear: 'pending-edits:clear',
+    Changed: 'pending-edits:changed',
   },
   Sources: {
     Ingest: 'sources:ingest',

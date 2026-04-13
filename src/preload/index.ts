@@ -37,6 +37,10 @@ const api: MystApi = {
   },
   chat: {
     send: (message, activeDocument) => ipcRenderer.invoke(IpcChannels.Chat.Send, message, activeDocument),
+    sendInCommentThread: (commentId, message) =>
+      ipcRenderer.invoke(IpcChannels.Chat.SendInCommentThread, commentId, message),
+    actionComments: (commentIds, activeDocument) =>
+      ipcRenderer.invoke(IpcChannels.Chat.ActionComments, commentIds, activeDocument),
     history: () => ipcRenderer.invoke(IpcChannels.Chat.History),
     clear: () => ipcRenderer.invoke(IpcChannels.Chat.Clear),
     onChunk: (callback) => {
@@ -72,6 +76,38 @@ const api: MystApi = {
       ipcRenderer.on(IpcChannels.Sources.Changed, handler);
       return () => {
         ipcRenderer.removeListener(IpcChannels.Sources.Changed, handler);
+      };
+    },
+  },
+  comments: {
+    list: (docFilename) => ipcRenderer.invoke(IpcChannels.Comments.List, docFilename),
+    create: (docFilename, data) => ipcRenderer.invoke(IpcChannels.Comments.Create, docFilename, data),
+    update: (id, changes) => ipcRenderer.invoke(IpcChannels.Comments.Update, id, changes),
+    delete: (id) => ipcRenderer.invoke(IpcChannels.Comments.Delete, id),
+    resolve: (id) => ipcRenderer.invoke(IpcChannels.Comments.Resolve, id),
+    reopen: (id) => ipcRenderer.invoke(IpcChannels.Comments.Reopen, id),
+    onChanged: (callback) => {
+      const handler = (): void => {
+        callback();
+      };
+      ipcRenderer.on(IpcChannels.Comments.Changed, handler);
+      return () => {
+        ipcRenderer.removeListener(IpcChannels.Comments.Changed, handler);
+      };
+    },
+  },
+  pendingEdits: {
+    list: (docFilename) => ipcRenderer.invoke(IpcChannels.PendingEdits.List, docFilename),
+    accept: (id) => ipcRenderer.invoke(IpcChannels.PendingEdits.Accept, id),
+    reject: (id) => ipcRenderer.invoke(IpcChannels.PendingEdits.Reject, id),
+    clear: (docFilename) => ipcRenderer.invoke(IpcChannels.PendingEdits.Clear, docFilename),
+    onChanged: (callback) => {
+      const handler = (): void => {
+        callback();
+      };
+      ipcRenderer.on(IpcChannels.PendingEdits.Changed, handler);
+      return () => {
+        ipcRenderer.removeListener(IpcChannels.PendingEdits.Changed, handler);
       };
     },
   },
