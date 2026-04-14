@@ -44,6 +44,23 @@ const MAX_LOOKUP_ROUNDS = 3;
 const MAX_RESEARCH_ROUNDS = 1;
 const MAX_QUERIES_PER_ROUND = 5;
 
+/**
+ * Normalize a URL for dedup comparisons. Strips trailing slash, fragment, and
+ * lowercases the host. Good enough to catch "same page, different casing" and
+ * "…/foo vs …/foo/" collisions that Tavily routinely hands back.
+ */
+function canonicalUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    u.hash = '';
+    let path = u.pathname.replace(/\/+$/, '');
+    if (path === '') path = '/';
+    return `${u.protocol}//${u.host.toLowerCase()}${path}${u.search}`;
+  } catch {
+    return raw.trim().toLowerCase();
+  }
+}
+
 async function streamWithLookupResolution(
   args: {
     apiKey: string;
@@ -376,6 +393,17 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
   );
   notifyChanged();
 
+  // Seed the dedup set with URLs for every source already in the wiki, so
+  // re-runs don't re-ingest the same page the planner happens to surface
+  // again. The set is mutated as new sources land within this loop.
+  const seenUrls = new Set<string>();
+  {
+    const existing = await listSources();
+    for (const src of existing) {
+      if (src.sourcePath) seenUrls.add(canonicalUrl(src.sourcePath));
+    }
+  }
+
   let tokensThisLoop = 0;
   let converged = false;
 
@@ -411,7 +439,7 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
     }
 
     for (const proposal of plan.slice(0, MAX_QUERIES_PER_ROUND)) {
-      const ingested = await runOneQuery(proposal, tavilyKey);
+      const ingested = await runOneQuery(proposal, tavilyKey, seenUrls);
       tokensThisLoop += estimateTokensK(
         ingested.reduce((sum, r) => sum + r.content.length + (r.rawContent?.length ?? 0), 0),
       );
@@ -462,18 +490,25 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
 async function runOneQuery(
   proposal: ResearchQueryProposal,
   tavilyKey: string,
+  seenUrls: Set<string>,
 ): Promise<TavilyResult[]> {
   const resp = await tavilySearch({ apiKey: tavilyKey, query: proposal.query, maxResults: 4 });
   if (!resp || resp.results.length === 0) return [];
 
-  const top = resp.results.slice(0, 3);
   const ingested: TavilyResult[] = [];
-  for (const result of top) {
+  for (const result of resp.results) {
+    if (ingested.length >= 3) break;
+    const canonical = canonicalUrl(result.url);
+    if (seenUrls.has(canonical)) {
+      log('deep-plan', 'research.dedupSkip', { url: result.url });
+      continue;
+    }
     const body = result.rawContent || result.content;
     if (!body || body.length < 200) continue;
     try {
       const title = `${result.title} (${new URL(result.url).hostname})`;
       await ingestText(`Source URL: ${result.url}\n\n${body}`, title);
+      seenUrls.add(canonical);
       ingested.push(result);
     } catch (err) {
       logError('deep-plan', 'research.ingestFailed', err, { url: result.url });
