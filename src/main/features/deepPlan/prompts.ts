@@ -42,6 +42,18 @@ function sourcesBlock(sources: SourceMeta[]): string {
     .join('\n');
 }
 
+/**
+ * Plain source block for the one-shot draft pass. Deliberately omits anchor
+ * ids so the generator doesn't copy that shape into citations — it just sees
+ * the slug and a short summary, and is told to cite as `[name](slug.md)`.
+ */
+function plainSourcesBlock(sources: SourceMeta[]): string {
+  if (sources.length === 0) return '_No sources yet._';
+  return sources
+    .map((s) => `- **${s.name}** (${s.slug}): ${s.indexSummary}`)
+    .join('\n');
+}
+
 export const DEEP_REFERENCE_RIDER = `[Deep reference] Each source above may list anchor ids (format \`slug#anchor-id\`) beneath it. To pull the EXACT verbatim passage for an anchor, emit a fenced \`source_lookup\` block. The system will resolve it deterministically and inject the verbatim text into the conversation before your next turn. Never paraphrase quotes from memory — use the lookup.
 
 Format:
@@ -192,13 +204,13 @@ User's task: "${session.task}"
 Rubric (your marching orders):
 ${rubricBlock(session.rubric)}
 
-Sources available (slugs are in parentheses; cite them with the format below):
-${sourcesBlock(sources)}
+Sources available (slugs are in parentheses):
+${plainSourcesBlock(sources)}
 
 Rules for the draft:
-1. Ground most lines in the sources. Any claim carrying facts, numbers, arguments, or positions must be inline-cited using author-year form with a clickable link to the slug:
-     \`([Author](slug.md), YEAR)\`
-   where **Author** is the first-author surname (or a short sensible label if unknown) and **YEAR** comes from the source. Example: \`([Michael](michaelpaper.md), 2025)\`. If the slug appears naturally in the prose, you can still use \`[text](slug.md)\` — but prefer author-year citations at the ends of claims so the reader gets a clean click-through. Descriptive or connective prose can go uncited; err on the side of citing.
+1. Ground most lines in the sources. Any claim carrying facts, numbers, arguments, or positions must be inline-cited as a plain markdown link to the slug, followed by the year:
+     [Name](slug.md), YEAR
+   where **Name** is the source's short label (first-author surname if a paper, or a short sensible label otherwise) and **YEAR** comes from the source. Example: \`[Michael](michaelpaper.md), 2025\`. Do NOT wrap citations in backticks. Do NOT append \`#anchor\` fragments or any other suffix to the slug — just the plain \`slug.md\` link. Descriptive or connective prose can go uncited; err on the side of citing.
 2. Include a counter-argument pass — briefly address the strongest objection to your thesis before rebutting or conceding.
 3. Hit the rubric's length target, form, and audience. Match the requested thesis/angle.
 4. No preamble, no "Here is your draft:", no meta-commentary. Start with the title or opening line and write the full piece straight through.
