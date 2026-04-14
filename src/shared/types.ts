@@ -48,6 +48,33 @@ export interface SourceMeta {
   summary: string;
   indexSummary: string;
   sourcePath?: string;
+  anchors?: SourceAnchorSummary[];
+}
+
+export type SourceAnchorType =
+  | 'definition'
+  | 'rule'
+  | 'argument'
+  | 'idea'
+  | 'equation'
+  | 'finding'
+  | 'section';
+
+export interface SourceAnchorSummary {
+  id: string;
+  type: SourceAnchorType;
+  label: string;
+}
+
+export interface SourceAnchor extends SourceAnchorSummary {
+  keywords: string[];
+  charStart: number;
+  charEnd: number;
+}
+
+export interface SourceIndex {
+  version: 1;
+  anchors: SourceAnchor[];
 }
 
 export interface DocumentFile {

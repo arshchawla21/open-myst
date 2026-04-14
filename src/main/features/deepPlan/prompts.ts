@@ -30,10 +30,29 @@ function rubricBlock(rubric: DeepPlanRubric): string {
 
 function sourcesBlock(sources: SourceMeta[]): string {
   if (sources.length === 0) return '_No sources yet._';
-  return sources.map((s) => `- **${s.name}** (${s.slug}): ${s.indexSummary}`).join('\n');
+  return sources
+    .map((s) => {
+      const head = `- **${s.name}** (${s.slug}): ${s.indexSummary}`;
+      if (!s.anchors || s.anchors.length === 0) return head;
+      const anchorLines = s.anchors
+        .map((a) => `    - \`${s.slug}#${a.id}\` [${a.type}] ${a.label}`)
+        .join('\n');
+      return `${head}\n${anchorLines}`;
+    })
+    .join('\n');
 }
 
-const PERSONA = `You are Myst's Deep Plan planner — a research collaborator running a focused pre-writing phase. You are terse, warm, and opinionated. Every clarification question you ask has a stated default you think is probably right; the user either confirms it or pushes back. You never write the actual document here — your job is to shape the plan that will produce it.`;
+export const DEEP_REFERENCE_RIDER = `[Deep reference] Each source above may list anchor ids (format \`slug#anchor-id\`) beneath it. To pull the EXACT verbatim passage for an anchor, emit a fenced \`source_lookup\` block. The system will resolve it deterministically and inject the verbatim text into the conversation before your next turn. Never paraphrase quotes from memory — use the lookup.
+
+Format:
+\`\`\`source_lookup
+{"slug": "smith-2022", "anchor": "law-1-2"}
+\`\`\`
+Multiple lookups in one response are fine. Use them freely when precision matters.`;
+
+const PERSONA = `You are Myst's Deep Plan planner — a research collaborator running a focused pre-writing phase. You are terse, warm, and opinionated. Every clarification question you ask has a stated default you think is probably right; the user either confirms it or pushes back. You never write the actual document here — your job is to shape the plan that will produce it.
+
+${DEEP_REFERENCE_RIDER}`;
 
 export function intentPrompt(): string {
   return `${PERSONA}
@@ -99,9 +118,7 @@ End with a one-line recommendation: either "I'll go find that" (if gaps exist) o
 }
 
 export function researchPlannerPrompt(session: DeepPlanSession, sources: SourceMeta[]): string {
-  return `${PERSONA}
-
-STAGE: Deep research loop.
+  return `You are the research query generator for Myst's Deep Plan. Your ONLY job is to emit the next batch of web searches — no prose, no questions, no chat.
 
 The user's task: "${session.task}"
 
@@ -114,18 +131,17 @@ ${sourcesBlock(sources)}
 Queries already run:
 ${session.researchQueries.length === 0 ? '(none yet)' : session.researchQueries.map((q) => `- "${q.query}" → ${q.ingestedSlugs.length} sources added`).join('\n')}
 
-Your job: propose the next 1-3 web searches to fill gaps in the rubric. Prefer queries that would surface primary sources (original papers, official docs, court opinions, firsthand accounts) over secondary commentary. Do NOT repeat queries already run.
+Propose the next 1-3 web searches to fill gaps in the rubric. Prefer queries that surface primary sources (original papers, official docs, court opinions, firsthand accounts) over secondary commentary. Do NOT repeat queries already run. Be precise — queries should be specific enough to return substantive results.
 
-Emit your plan as a fenced code block tagged \`research_plan\` containing a JSON array:
+Output ONLY a fenced \`research_plan\` block. No text before or after.
 
 \`\`\`research_plan
 [
-  {"query": "...", "rationale": "why this matters for the rubric"},
-  ...
+  {"query": "...", "rationale": "why this matters for the rubric"}
 ]
 \`\`\`
 
-If you think the research loop is done (rubric adequately covered), emit an empty array \`[]\`. No prose around the block, just the block.`;
+If you believe the rubric is adequately covered and no more research is needed, emit an empty array \`[]\`.`;
 }
 
 export function clarifyPrompt(session: DeepPlanSession, sources: SourceMeta[]): string {
@@ -174,11 +190,13 @@ User's task: "${session.task}"
 Rubric (your marching orders):
 ${rubricBlock(session.rubric)}
 
-Sources available (cite inline with \`[text](slug.md)\` markdown links — the slugs are in parentheses):
+Sources available (slugs are in parentheses; cite them with the format below):
 ${sourcesBlock(sources)}
 
 Rules for the draft:
-1. Ground most lines in the sources. Any claim carrying facts, numbers, arguments, or positions should be inline-cited with \`[text](slug.md)\` pointing at the relevant slug. Descriptive or connective prose can go uncited, but err on the side of citing.
+1. Ground most lines in the sources. Any claim carrying facts, numbers, arguments, or positions must be inline-cited using author-year form with a clickable link to the slug:
+     \`([Author](slug.md), YEAR)\`
+   where **Author** is the first-author surname (or a short sensible label if unknown) and **YEAR** comes from the source. Example: \`([Michael](michaelpaper.md), 2025)\`. If the slug appears naturally in the prose, you can still use \`[text](slug.md)\` — but prefer author-year citations at the ends of claims so the reader gets a clean click-through. Descriptive or connective prose can go uncited; err on the side of citing.
 2. Include a counter-argument pass — briefly address the strongest objection to your thesis before rebutting or conceding.
 3. Hit the rubric's length target, form, and audience. Match the requested thesis/angle.
 4. No preamble, no "Here is your draft:", no meta-commentary. Start with the title or opening line and write the full piece straight through.

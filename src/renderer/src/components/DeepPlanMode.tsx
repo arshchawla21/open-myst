@@ -31,7 +31,6 @@ export function DeepPlanMode(): JSX.Element {
     busy,
     error,
     refresh,
-    hide,
     start,
     skip,
     ingestChunk,
@@ -73,7 +72,7 @@ export function DeepPlanMode(): JSX.Element {
       <StageBar
         stage={session?.stage ?? 'intent'}
         tokensUsedK={session?.tokensUsedK ?? 0}
-        onSkip={() => void skip()}
+        onOpenSettings={openSettings}
       />
 
       {error && (
@@ -123,8 +122,8 @@ export function DeepPlanMode(): JSX.Element {
       </div>
 
       <div className="dp-footer">
-        <button type="button" className="link" onClick={hide}>
-          Hide Deep Plan
+        <button type="button" className="link" onClick={() => void skip()}>
+          Skip Deep Plan
         </button>
       </div>
 

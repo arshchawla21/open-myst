@@ -34,6 +34,53 @@ import {
 } from './prompts';
 import { applyRubricPatch, parsePlannerReply, type ResearchQueryProposal } from './parse';
 import { tavilySearch, type TavilyResult } from './tavily';
+import {
+  formatLookupReply,
+  parseSourceLookups,
+  resolveSourceLookups,
+} from '../sources/sourceLookup';
+
+const MAX_LOOKUP_ROUNDS = 3;
+const MAX_RESEARCH_ROUNDS = 4;
+
+async function streamWithLookupResolution(
+  args: {
+    apiKey: string;
+    model: string;
+    messages: LlmMessage[];
+  },
+): Promise<string> {
+  let content = await streamChat({
+    apiKey: args.apiKey,
+    model: args.model,
+    messages: args.messages,
+    logScope: 'deep-plan',
+    onChunk: (chunk) => broadcast(IpcChannels.DeepPlan.Chunk, chunk),
+  });
+
+  for (let round = 0; round < MAX_LOOKUP_ROUNDS; round++) {
+    const { requests } = parseSourceLookups(content);
+    if (requests.length === 0) break;
+    log('deep-plan', 'sourceLookup.round', { round, count: requests.length });
+    const resolved = await resolveSourceLookups(requests);
+    const followUp = formatLookupReply(resolved);
+    const replayMessages: LlmMessage[] = [
+      ...args.messages,
+      { role: 'assistant', content },
+      { role: 'user', content: followUp },
+    ];
+    content = await streamChat({
+      apiKey: args.apiKey,
+      model: args.model,
+      messages: replayMessages,
+      logScope: 'deep-plan',
+      onChunk: (chunk) => broadcast(IpcChannels.DeepPlan.Chunk, chunk),
+    });
+  }
+
+  // Strip any unresolved fences so they don't leak into the chat body.
+  return parseSourceLookups(content).stripped || content;
+}
 
 /**
  * Deep Plan orchestration. This file is the brains:
@@ -137,8 +184,8 @@ export async function sendUserMessage(text: string): Promise<DeepPlanStatus> {
   if (!text.trim()) return buildStatus();
 
   const builder = STAGE_PROMPT_BUILDERS[session.stage];
-  if (!builder) {
-    // In a terminal stage, just append the user turn.
+  if (!builder || session.stage === 'research') {
+    // Terminal stages and autonomous research just record the user turn.
     await updateSession((s) => appendMessage(s, 'user', text));
     notifyChanged();
     return buildStatus();
@@ -161,13 +208,7 @@ export async function sendUserMessage(text: string): Promise<DeepPlanStatus> {
 
   let fullContent = '';
   try {
-    fullContent = await streamChat({
-      apiKey: key,
-      model,
-      messages,
-      logScope: 'deep-plan',
-      onChunk: (chunk) => broadcast(IpcChannels.DeepPlan.Chunk, chunk),
-    });
+    fullContent = await streamWithLookupResolution({ apiKey: key, model, messages });
   } catch (err) {
     logError('deep-plan', 'planner.stream.failed', err);
     broadcast(IpcChannels.DeepPlan.ChunkDone);
@@ -220,6 +261,25 @@ export async function advanceStage(): Promise<DeepPlanStatus> {
   }));
   notifyChanged();
 
+  if (target === 'research') {
+    // Research is fully autonomous — kick off the multi-round loop instead of
+    // priming a planner chat turn.
+    try {
+      await runResearchLoop();
+    } catch (err) {
+      logError('deep-plan', 'research.autoloop.failed', err);
+      await updateSession((s) =>
+        appendMessage(
+          s,
+          'assistant',
+          `Research hit an error: ${(err as Error).message}. You can hit Continue to move on.`,
+        ),
+      );
+      notifyChanged();
+    }
+    return buildStatus();
+  }
+
   // Auto-emit an opening planner message for the new stage so the user sees
   // something other than silence after hitting Continue.
   await primeStage(target);
@@ -253,13 +313,7 @@ async function primeStage(stage: DeepPlanStage): Promise<void> {
 
   let content = '';
   try {
-    content = await streamChat({
-      apiKey: key,
-      model,
-      messages,
-      logScope: 'deep-plan',
-      onChunk: (chunk) => broadcast(IpcChannels.DeepPlan.Chunk, chunk),
-    });
+    content = await streamWithLookupResolution({ apiKey: key, model, messages });
   } catch (err) {
     logError('deep-plan', 'planner.prime.failed', err, { stage });
     broadcast(IpcChannels.DeepPlan.ChunkDone);
@@ -298,7 +352,7 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
       appendMessage(
         s,
         'assistant',
-        'I need a Tavily API key to run web research. Open Settings and add one, then hit Run Research again. You can also just Skip this stage if you have enough sources already.',
+        'I need a Tavily API key to run autonomous research. Open Settings and add one, then hit Continue again. You can also hit Continue without it to skip ahead.',
       ),
     );
     notifyChanged();
@@ -307,89 +361,95 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
 
   const key = await requireKey();
   const model = await getDeepPlanModel();
-  const sources = await listSources();
 
-  // Ask the planner for the next batch of queries.
-  const plannerSystem = researchPlannerPrompt(session, sources);
-  const plannerMessages: LlmMessage[] = [
-    { role: 'system', content: plannerSystem },
-    { role: 'user', content: 'Propose the next queries now.' },
-  ];
+  await updateSession((s) =>
+    appendMessage(
+      s,
+      'assistant',
+      'Starting autonomous research — this will take a couple of minutes.',
+      'research-note',
+    ),
+  );
+  notifyChanged();
 
-  const rawPlan = await completeText({
-    apiKey: key,
-    model,
-    messages: plannerMessages,
-    logScope: 'deep-plan',
-  });
-  if (rawPlan === null) {
-    await updateSession((s) =>
-      appendMessage(
-        s,
-        'assistant',
-        'The planner model did not respond. Try again, or skip to the next stage.',
-      ),
-    );
-    notifyChanged();
-    return buildStatus();
-  }
+  let tokensThisLoop = 0;
+  let rounds = 0;
+  let converged = false;
 
-  const parsed = parsePlannerReply(rawPlan);
-  const plan = parsed.researchPlan ?? [];
-  log('deep-plan', 'research.planned', { count: plan.length });
+  for (let round = 0; round < MAX_RESEARCH_ROUNDS; round++) {
+    rounds = round + 1;
+    const current = await readSession();
+    if (!current) break;
+    const sources = await listSources();
+    const plannerSystem = researchPlannerPrompt(current, sources);
+    const plannerMessages: LlmMessage[] = [
+      { role: 'system', content: plannerSystem },
+      { role: 'user', content: 'Propose the next queries now.' },
+    ];
 
-  if (plan.length === 0) {
-    await updateSession((s) =>
-      appendMessage(
-        s,
-        'assistant',
-        'I think we have enough. Hit Continue to move on to clarification questions.',
-      ),
-    );
-    notifyChanged();
-    return buildStatus();
-  }
-
-  let tokensThisLoop = estimateTokensK(plannerSystem.length + rawPlan.length);
-
-  for (const proposal of plan.slice(0, 3)) {
-    const ingested = await runOneQuery(proposal, tavilyKey);
-    tokensThisLoop += estimateTokensK(
-      ingested.reduce((sum, r) => sum + r.content.length + (r.rawContent?.length ?? 0), 0),
-    );
-    await updateSession((s) => {
-      const record = {
-        query: proposal.query,
-        rationale: proposal.rationale,
-        resultsSeen: ingested.length,
-        ingestedSlugs: ingested.map((r) => r.url),
-        timestamp: new Date().toISOString(),
-      };
-      const note = `Searched **${proposal.query}** — added ${ingested.length} source${
-        ingested.length === 1 ? '' : 's'
-      } to the wiki.${
-        proposal.rationale ? `\n\n_Why:_ ${proposal.rationale}` : ''
-      }`;
-      return {
-        ...s,
-        researchQueries: [...s.researchQueries, record],
-        messages: [
-          ...s.messages,
-          {
-            id: randomUUID(),
-            role: 'assistant',
-            content: note,
-            kind: 'research-note',
-            timestamp: new Date().toISOString(),
-          },
-        ],
-      };
+    const rawPlan = await completeText({
+      apiKey: key,
+      model,
+      messages: plannerMessages,
+      logScope: 'deep-plan',
     });
-    notifyChanged();
+    if (rawPlan === null) {
+      log('deep-plan', 'research.planner.nullReply', { round });
+      break;
+    }
+    tokensThisLoop += estimateTokensK(plannerSystem.length + rawPlan.length);
+
+    const parsed = parsePlannerReply(rawPlan);
+    const plan = parsed.researchPlan ?? [];
+    log('deep-plan', 'research.planned', { round, count: plan.length });
+
+    if (plan.length === 0) {
+      converged = true;
+      break;
+    }
+
+    for (const proposal of plan.slice(0, 3)) {
+      const ingested = await runOneQuery(proposal, tavilyKey);
+      tokensThisLoop += estimateTokensK(
+        ingested.reduce((sum, r) => sum + r.content.length + (r.rawContent?.length ?? 0), 0),
+      );
+      await updateSession((s) => {
+        const record = {
+          query: proposal.query,
+          rationale: proposal.rationale,
+          resultsSeen: ingested.length,
+          ingestedSlugs: ingested.map((r) => r.url),
+          timestamp: new Date().toISOString(),
+        };
+        const note = `Searched **${proposal.query}** — added ${ingested.length} source${
+          ingested.length === 1 ? '' : 's'
+        } to the wiki.${
+          proposal.rationale ? `\n\n_Why:_ ${proposal.rationale}` : ''
+        }`;
+        return {
+          ...s,
+          researchQueries: [...s.researchQueries, record],
+          messages: [
+            ...s.messages,
+            {
+              id: randomUUID(),
+              role: 'assistant',
+              content: note,
+              kind: 'research-note',
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        };
+      });
+      notifyChanged();
+    }
   }
 
+  const summary = converged
+    ? `Research complete after ${rounds} round${rounds === 1 ? '' : 's'} — coverage looks good. Hit Continue to move on.`
+    : `Research wrapped after ${rounds} round${rounds === 1 ? '' : 's'}. Hit Continue when you're ready.`;
   await updateSession((s) => ({
-    ...s,
+    ...appendMessage(s, 'assistant', summary, 'research-note'),
     tokensUsedK: s.tokensUsedK + tokensThisLoop,
   }));
   notifyChanged();
@@ -465,6 +525,24 @@ export async function runOneShot(): Promise<DeepPlanStatus> {
 
   log('deep-plan', 'oneshot.start', { doc: target.filename, model });
 
+  // Seed the doc with a visible "writing" placeholder so the user sees
+  // something the moment Deep Plan hides, before the first token arrives.
+  await writeDocument(target.filename, '_Writing draft…_\n');
+  broadcast(IpcChannels.Document.Changed);
+
+  let buffer = '';
+  let lastFlushAt = 0;
+  const FLUSH_MS = 300;
+  const flushDraft = async (): Promise<void> => {
+    const body = buffer.trimStart();
+    if (body.length === 0) return;
+    try {
+      await writeDocument(target.filename, body);
+      broadcast(IpcChannels.Document.Changed);
+    } catch (err) {
+      logError('deep-plan', 'oneshot.flushFailed', err);
+    }
+  };
   let fullContent = '';
   try {
     fullContent = await streamChat({
@@ -472,16 +550,20 @@ export async function runOneShot(): Promise<DeepPlanStatus> {
       model,
       messages,
       logScope: 'deep-plan',
-      onChunk: (chunk) => broadcast(IpcChannels.DeepPlan.Chunk, chunk),
+      onChunk: (chunk) => {
+        buffer += chunk;
+        const now = Date.now();
+        if (now - lastFlushAt >= FLUSH_MS) {
+          lastFlushAt = now;
+          void flushDraft();
+        }
+      },
     });
   } catch (err) {
     logError('deep-plan', 'oneshot.failed', err);
-    broadcast(IpcChannels.DeepPlan.ChunkDone);
     throw err;
   }
-  broadcast(IpcChannels.DeepPlan.ChunkDone);
 
-  // Overwrite the target document with the generated draft.
   const cleaned = fullContent.trim();
   if (cleaned.length === 0) {
     throw new Error('The generator returned an empty draft. Try again.');

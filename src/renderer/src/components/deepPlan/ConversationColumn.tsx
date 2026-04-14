@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DeepPlanMessage, DeepPlanSession, DeepPlanStage } from '@shared/types';
 import { useDeepPlan } from '../../store/deepPlan';
+import { renderMarkdown } from '../../utils/markdown';
+import { stripDeepPlanFences } from './stripFences';
+
+function Markdown({ text }: { text: string }): JSX.Element {
+  const html = useMemo(() => renderMarkdown(text), [text]);
+  return <div className="dp-md" dangerouslySetInnerHTML={{ __html: html }} />;
+}
 
 interface Props {
   session: DeepPlanSession;
@@ -22,7 +29,7 @@ const STAGE_HINTS: Record<DeepPlanStage, { continueLabel: string; helper: string
   },
   research: {
     continueLabel: 'Continue to clarify',
-    helper: 'Hit Run research to run Tavily queries. Continue when you\'re satisfied.',
+    helper: 'Researching autonomously — this takes a couple of minutes.',
   },
   clarify: {
     continueLabel: 'Continue to review',
@@ -37,8 +44,7 @@ const STAGE_HINTS: Record<DeepPlanStage, { continueLabel: string; helper: string
 };
 
 export function ConversationColumn({ session }: Props): JSX.Element {
-  const { streaming, streamingBuffer, busy, sendMessage, advance, runResearch, oneShot } =
-    useDeepPlan();
+  const { streaming, streamingBuffer, busy, sendMessage, advance, oneShot } = useDeepPlan();
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -59,7 +65,6 @@ export function ConversationColumn({ session }: Props): JSX.Element {
 
   const stage = session.stage;
   const hint = STAGE_HINTS[stage];
-  const isResearchStage = stage === 'research';
   const isReviewStage = stage === 'review';
   const isDone = stage === 'done';
 
@@ -72,13 +77,28 @@ export function ConversationColumn({ session }: Props): JSX.Element {
         {session.messages.map((m) => (
           <MessageBubble key={m.id} message={m} />
         ))}
-        {streaming && (
-          <div className="dp-msg dp-msg-assistant">
-            <div className="dp-msg-body">
-              {streamingBuffer || <span className="dp-muted">Thinking…</span>}
+        {streaming && (() => {
+          const { visible, isWriting } = stripDeepPlanFences(streamingBuffer);
+          return (
+            <div className="dp-msg dp-msg-assistant">
+              <div className="dp-msg-body">
+                {visible && <Markdown text={visible} />}
+                {(isWriting || !visible) && (
+                  <div className="dp-typing">
+                    <span className="generating-dots">
+                      <span className="dot" />
+                      <span className="dot" />
+                      <span className="dot" />
+                    </span>
+                    <span className="dp-muted">
+                      {' '}{isWriting ? 'Planning…' : 'Thinking…'}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       <div className="dp-chat-footer">
@@ -109,16 +129,6 @@ export function ConversationColumn({ session }: Props): JSX.Element {
         </form>
 
         <div className="dp-chat-actions">
-          {isResearchStage && (
-            <button
-              type="button"
-              className="dp-btn dp-btn-secondary"
-              onClick={() => void runResearch()}
-              disabled={busy}
-            >
-              Run research
-            </button>
-          )}
           {isReviewStage ? (
             <button
               type="button"
@@ -159,20 +169,17 @@ function MessageBubble({ message }: { message: DeepPlanMessage }): JSX.Element {
       <div className="dp-research-note">
         <div className="dp-research-note-icon">🔍</div>
         <div className="dp-research-note-body">
-          {message.content.split('\n').map((line, i) => (
-            <div key={i}>{line}</div>
-          ))}
+          <Markdown text={message.content} />
         </div>
       </div>
     );
   }
   const klass = message.role === 'user' ? 'dp-msg dp-msg-user' : 'dp-msg dp-msg-assistant';
+  const { visible } = stripDeepPlanFences(message.content);
   return (
     <div className={klass}>
       <div className="dp-msg-body">
-        {message.content.split('\n').map((line, i) => (
-          <div key={i}>{line || '\u00A0'}</div>
-        ))}
+        <Markdown text={visible || message.content} />
       </div>
     </div>
   );

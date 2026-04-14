@@ -61,6 +61,11 @@ export async function updateWikiIndex(sources: SourceMeta[]): Promise<void> {
   } else {
     for (const s of sources) {
       lines.push(`- [${s.name}](../../sources/${s.slug}.md) — ${s.indexSummary}`);
+      if (s.anchors && s.anchors.length > 0) {
+        for (const a of s.anchors) {
+          lines.push(`  - \`${s.slug}#${a.id}\` [${a.type}] ${a.label}`);
+        }
+      }
     }
   }
   lines.push('');

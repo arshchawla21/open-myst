@@ -121,14 +121,16 @@ export const useDeepPlan = create<DeepPlanState>((set, get) => ({
   },
 
   oneShot: async () => {
-    set({ busy: true, error: null, streaming: true, streamingBuffer: '' });
+    // Hide Deep Plan immediately so the user sees the draft land in the main
+    // editor live instead of watching it stream inside the planner view.
+    set({ busy: true, error: null, visible: false });
     try {
       const status = await bridge.deepPlan.oneShot();
-      set({ status, visible: false });
+      set({ status });
     } catch (err) {
       set({ error: (err as Error).message });
     } finally {
-      set({ busy: false, streaming: false, streamingBuffer: '' });
+      set({ busy: false });
     }
   },
 

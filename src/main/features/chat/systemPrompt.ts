@@ -48,7 +48,11 @@ function buildWikiBlock(wikiIndex: string): string {
     '\n\n========== BEGIN research wiki index (.myst/wiki/index.md — your default memory surface) ==========\n' +
     wikiIndex +
     '\n========== END research wiki index ==========\n' +
-    'This index is loaded every turn. Treat it as the map of what you already know: consult it before answering, and open the source pages (sources/<slug>.md) it points at when you need the full text. Do not ask the user to attach sources that are already here.'
+    'This index is loaded every turn. Treat it as the map of what you already know: consult it before answering, and open the source pages (sources/<slug>.md) it points at when you need the full text. Do not ask the user to attach sources that are already here.\n\n' +
+    '[Deep reference] Each source lists anchor ids beneath it (format `slug#anchor-id`). To pull the EXACT verbatim passage for an anchor — for quoting, definition checks, citing a law/equation — emit a fenced `source_lookup` block. The system will resolve it deterministically from disk and inject the verbatim text back into the conversation before your next turn. Do NOT paraphrase quotes from memory — use the lookup.\n\n' +
+    'Format:\n' +
+    '```source_lookup\n{"slug": "smith-2022", "anchor": "law-1-2"}\n```\n' +
+    'You may emit multiple source_lookup blocks in one response; each is resolved independently. Lookups are free — use them liberally when precision matters.'
   );
 }
 

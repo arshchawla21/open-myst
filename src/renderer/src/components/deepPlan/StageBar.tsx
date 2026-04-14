@@ -4,7 +4,7 @@ import { DEEP_PLAN_STAGE_ORDER } from '@shared/types';
 interface Props {
   stage: DeepPlanStage;
   tokensUsedK: number;
-  onSkip: () => void;
+  onOpenSettings: () => void;
 }
 
 const STAGE_LABELS: Record<DeepPlanStage, string> = {
@@ -19,7 +19,7 @@ const STAGE_LABELS: Record<DeepPlanStage, string> = {
   done: 'Done',
 };
 
-export function StageBar({ stage, tokensUsedK, onSkip }: Props): JSX.Element {
+export function StageBar({ stage, tokensUsedK, onOpenSettings }: Props): JSX.Element {
   const visible = DEEP_PLAN_STAGE_ORDER.filter((s) => s !== 'done');
   const currentIdx = DEEP_PLAN_STAGE_ORDER.indexOf(stage);
 
@@ -45,8 +45,14 @@ export function StageBar({ stage, tokensUsedK, onSkip }: Props): JSX.Element {
         <span className="dp-stagebar-meter" title="Deep research tokens used">
           {tokensUsedK.toFixed(1)}K tokens
         </span>
-        <button type="button" className="dp-stagebar-skip" onClick={onSkip}>
-          Skip to editor
+        <button
+          type="button"
+          className="dp-stagebar-skip"
+          onClick={onOpenSettings}
+          title="Settings"
+          aria-label="Settings"
+        >
+          Settings
         </button>
       </div>
     </div>
