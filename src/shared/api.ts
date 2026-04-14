@@ -18,9 +18,9 @@ export interface MystApi {
     hasOpenRouterKey: () => Promise<boolean>;
     clearOpenRouterKey: () => Promise<void>;
     setDefaultModel: (model: string) => Promise<void>;
-    setTavilyKey: (key: string) => Promise<void>;
-    hasTavilyKey: () => Promise<boolean>;
-    clearTavilyKey: () => Promise<void>;
+    setJinaKey: (key: string) => Promise<void>;
+    hasJinaKey: () => Promise<boolean>;
+    clearJinaKey: () => Promise<void>;
     setDeepPlanModel: (model: string) => Promise<void>;
   };
   projects: {

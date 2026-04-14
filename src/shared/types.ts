@@ -1,7 +1,7 @@
 export interface AppSettings {
   defaultModel: string;
   hasOpenRouterKey: boolean;
-  hasTavilyKey: boolean;
+  hasJinaKey: boolean;
   deepPlanModel: string;
   recentProjects: string[];
 }

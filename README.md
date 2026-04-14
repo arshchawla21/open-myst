@@ -12,7 +12,7 @@ A desktop writing and research companion. You write in a markdown editor, an LLM
 
 ### 1. Deep Plan
 
-A pre-writing phase that interviews you, shapes a rubric, runs autonomous web research through Tavily, and then one-shots a fully-cited first draft straight into the editor. Opinionated by design: every question comes with a default you confirm or push back on, so you're not staring at an empty form.
+A pre-writing phase that interviews you, shapes a rubric, runs autonomous web research through Jina, and then one-shots a fully-cited first draft straight into the editor. Opinionated by design: every question comes with a default you confirm or push back on, so you're not staring at an empty form.
 
 ![Deep Plan intro screen](res/agent_building_wiki.png)
 

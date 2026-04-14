@@ -9,7 +9,7 @@ import type {
 } from '@shared/types';
 import { broadcast, log, logError } from '../../platform';
 import { streamChat, completeText, type LlmMessage } from '../../llm';
-import { getOpenRouterKey, getDeepPlanModel, getTavilyKey } from '../settings';
+import { getOpenRouterKey, getDeepPlanModel, getJinaKey } from '../settings';
 import { ingestText, listSources } from '../sources';
 import { listDocuments, writeDocument } from '../documents';
 import {
@@ -33,7 +33,7 @@ import {
   sourcesPrompt,
 } from './prompts';
 import { applyRubricPatch, parsePlannerReply, type ResearchQueryProposal } from './parse';
-import { tavilySearch, type TavilyResult } from './tavily';
+import { jinaSearch, type JinaResult } from './jina';
 import {
   formatLookupReply,
   parseSourceLookups,
@@ -45,9 +45,48 @@ const MAX_RESEARCH_ROUNDS = 1;
 const MAX_QUERIES_PER_ROUND = 5;
 
 /**
+ * Minimum scraped-content length we'll accept as a real source. Bot-block
+ * pages and cookie banners typically come back as 1-3KB of boilerplate; real
+ * prose is almost always above 2KB. This threshold is paired with
+ * `looksLikeBotBlock` for defence in depth.
+ */
+const MIN_CONTENT_CHARS = 1500;
+
+/**
+ * Cheap heuristic to detect the kinds of non-content pages search scrapers
+ * routinely hand back when they hit a paywall, captcha, or OneTrust cookie
+ * wall (e.g. ssrn.com, scholarship.law.tamu.edu under Elsevier). If the text
+ * contains two or more of these phrases we skip ingestion entirely rather
+ * than store the cookie banner as a "source".
+ */
+function looksLikeBotBlock(text: string): boolean {
+  const lower = text.toLowerCase();
+  const flags = [
+    'max challenge attempts',
+    'please refresh the page',
+    'manage consent preferences',
+    'cookie preference center',
+    'strictly necessary cookies',
+    'you have been blocked',
+    'access denied',
+    'cloudflare',
+    'checking your browser',
+    'enable javascript',
+    'are you a robot',
+    'just a moment',
+  ];
+  let hits = 0;
+  for (const f of flags) {
+    if (lower.includes(f)) hits++;
+    if (hits >= 2) return true;
+  }
+  return false;
+}
+
+/**
  * Normalize a URL for dedup comparisons. Strips trailing slash, fragment, and
  * lowercases the host. Good enough to catch "same page, different casing" and
- * "…/foo vs …/foo/" collisions that Tavily routinely hands back.
+ * "…/foo vs …/foo/" collisions that search providers routinely hand back.
  */
 function canonicalUrl(raw: string): string {
   try {
@@ -106,7 +145,7 @@ async function streamWithLookupResolution(
  *     streams via broadcast(Chunk), stores both messages, applies rubric
  *     patches, returns the updated status.
  *   - runResearchLoop: triggered from stage 4 → asks planner for queries,
- *     runs Tavily, ingests winning results as sources, updates counters.
+ *     runs Jina search, ingests winning results as sources, updates counters.
  *   - runOneShot: triggered from stage 7 → calls the generator model once
  *     with the full rubric + wiki, writes the draft into the active
  *     document, marks the session complete.
@@ -364,13 +403,13 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
     return buildStatus();
   }
 
-  const tavilyKey = await getTavilyKey();
-  if (!tavilyKey) {
+  const jinaKey = await getJinaKey();
+  if (!jinaKey) {
     await updateSession((s) =>
       appendMessage(
         s,
         'assistant',
-        'I need a Tavily API key to run autonomous research. Open Settings and add one, then hit Continue again. You can also hit Continue without it to skip ahead.',
+        'I need a Jina API key to run autonomous research. Open Settings and add one, then hit Continue again. You can also hit Continue without it to skip ahead.',
       ),
     );
     notifyChanged();
@@ -439,10 +478,38 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
     }
 
     for (const proposal of plan.slice(0, MAX_QUERIES_PER_ROUND)) {
-      const ingested = await runOneQuery(proposal, tavilyKey, seenUrls);
+      // Post a live "Searching X…" note BEFORE the query so the user sees
+      // forward progress during the long silent stretch where Jina pulls
+      // 3-4 pages and the digest LLM chews through each one. Without this
+      // the chat sits still for 30-60s per query and "Round done" feels
+      // premature when the last query happens to be slow.
+      const noteId = randomUUID();
+      const inProgressNote = `Searching **${proposal.query}**…${
+        proposal.rationale ? `\n\n_Why:_ ${proposal.rationale}` : ''
+      }`;
+      await updateSession((s) => ({
+        ...s,
+        messages: [
+          ...s.messages,
+          {
+            id: noteId,
+            role: 'assistant',
+            content: inProgressNote,
+            kind: 'research-note',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }));
+      notifyChanged();
+
+      const ingested = await runOneQuery(proposal, jinaKey, seenUrls);
       tokensThisLoop += estimateTokensK(
         ingested.reduce((sum, r) => sum + r.content.length + (r.rawContent?.length ?? 0), 0),
       );
+
+      // Mutate the in-progress note in place with the final result. We
+      // update by id so the chat stays at one note per query instead of
+      // doubling up.
       await updateSession((s) => {
         const record = {
           query: proposal.query,
@@ -451,7 +518,7 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
           ingestedSlugs: ingested.map((r) => r.url),
           timestamp: new Date().toISOString(),
         };
-        const note = `Searched **${proposal.query}** — added ${ingested.length} source${
+        const finalNote = `Searched **${proposal.query}** — added ${ingested.length} source${
           ingested.length === 1 ? '' : 's'
         } to the wiki.${
           proposal.rationale ? `\n\n_Why:_ ${proposal.rationale}` : ''
@@ -459,16 +526,9 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
         return {
           ...s,
           researchQueries: [...s.researchQueries, record],
-          messages: [
-            ...s.messages,
-            {
-              id: randomUUID(),
-              role: 'assistant',
-              content: note,
-              kind: 'research-note',
-              timestamp: new Date().toISOString(),
-            },
-          ],
+          messages: s.messages.map((m) =>
+            m.id === noteId ? { ...m, content: finalNote } : m,
+          ),
         };
       });
       notifyChanged();
@@ -489,13 +549,13 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
 
 async function runOneQuery(
   proposal: ResearchQueryProposal,
-  tavilyKey: string,
+  jinaKey: string,
   seenUrls: Set<string>,
-): Promise<TavilyResult[]> {
-  const resp = await tavilySearch({ apiKey: tavilyKey, query: proposal.query, maxResults: 4 });
+): Promise<JinaResult[]> {
+  const resp = await jinaSearch({ apiKey: jinaKey, query: proposal.query, maxResults: 4 });
   if (!resp || resp.results.length === 0) return [];
 
-  const ingested: TavilyResult[] = [];
+  const ingested: JinaResult[] = [];
   for (const result of resp.results) {
     if (ingested.length >= 3) break;
     const canonical = canonicalUrl(result.url);
@@ -504,7 +564,17 @@ async function runOneQuery(
       continue;
     }
     const body = result.rawContent || result.content;
-    if (!body || body.length < 200) continue;
+    if (!body || body.length < MIN_CONTENT_CHARS) {
+      log('deep-plan', 'research.skipTooShort', {
+        url: result.url,
+        len: body?.length ?? 0,
+      });
+      continue;
+    }
+    if (looksLikeBotBlock(body)) {
+      log('deep-plan', 'research.skipBotBlock', { url: result.url });
+      continue;
+    }
     try {
       const title = `${result.title} (${new URL(result.url).hostname})`;
       await ingestText(`Source URL: ${result.url}\n\n${body}`, title);

@@ -208,9 +208,9 @@ Sources available (slugs are in parentheses):
 ${plainSourcesBlock(sources)}
 
 Rules for the draft:
-1. Ground most lines in the sources. Any claim carrying facts, numbers, arguments, or positions must be inline-cited as a parenthesised markdown link to the slug, followed by the year — the whole citation lives inside one set of round brackets:
-     ([Name](slug.md), YEAR)
-   where **Name** is the source's short label (first-author surname if a paper, or a short sensible label otherwise) and **YEAR** comes from the source. Example: \`([Michael](michaelpaper.md), 2025)\`. The surrounding parentheses are required — never emit a bare \`[Name](slug.md), YEAR\` without them. Do NOT wrap citations in backticks. Do NOT append \`#anchor\` fragments or any other suffix to the slug — just the plain \`slug.md\` link. Descriptive or connective prose can go uncited; err on the side of citing.
+1. Ground most lines in the sources. Any claim carrying facts, numbers, arguments, or positions must be inline-cited as a parenthesised markdown link to the slug — the citation is just the source name inside round brackets, nothing else:
+     ([Name](slug.md))
+   where **Name** is the source's short label (first-author surname if a paper, or a short sensible label otherwise). Example: \`([Michael](michaelpaper.md))\`. The surrounding parentheses are required — never emit a bare \`[Name](slug.md)\` without them. Do NOT include a year — you don't have reliable year information and we'd rather have no year than a wrong one. Do NOT wrap citations in backticks. Do NOT append \`#anchor\` fragments or any other suffix to the slug — just the plain \`slug.md\` link. Descriptive or connective prose can go uncited; err on the side of citing.
 2. Include a counter-argument pass — briefly address the strongest objection to your thesis before rebutting or conceding.
 3. Hit the rubric's length target, form, and audience. Match the requested thesis/angle.
 4. No preamble, no "Here is your draft:", no meta-commentary. Start with the title or opening line and write the full piece straight through.

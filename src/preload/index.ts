@@ -9,9 +9,9 @@ const api: MystApi = {
     hasOpenRouterKey: () => ipcRenderer.invoke(IpcChannels.Settings.HasOpenRouterKey),
     clearOpenRouterKey: () => ipcRenderer.invoke(IpcChannels.Settings.ClearOpenRouterKey),
     setDefaultModel: (model) => ipcRenderer.invoke(IpcChannels.Settings.SetDefaultModel, model),
-    setTavilyKey: (key) => ipcRenderer.invoke(IpcChannels.Settings.SetTavilyKey, key),
-    hasTavilyKey: () => ipcRenderer.invoke(IpcChannels.Settings.HasTavilyKey),
-    clearTavilyKey: () => ipcRenderer.invoke(IpcChannels.Settings.ClearTavilyKey),
+    setJinaKey: (key) => ipcRenderer.invoke(IpcChannels.Settings.SetJinaKey, key),
+    hasJinaKey: () => ipcRenderer.invoke(IpcChannels.Settings.HasJinaKey),
+    clearJinaKey: () => ipcRenderer.invoke(IpcChannels.Settings.ClearJinaKey),
     setDeepPlanModel: (model) => ipcRenderer.invoke(IpcChannels.Settings.SetDeepPlanModel, model),
   },
   projects: {

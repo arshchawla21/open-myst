@@ -5,9 +5,9 @@ export const IpcChannels = {
     HasOpenRouterKey: 'settings:has-openrouter-key',
     ClearOpenRouterKey: 'settings:clear-openrouter-key',
     SetDefaultModel: 'settings:set-default-model',
-    SetTavilyKey: 'settings:set-tavily-key',
-    HasTavilyKey: 'settings:has-tavily-key',
-    ClearTavilyKey: 'settings:clear-tavily-key',
+    SetJinaKey: 'settings:set-jina-key',
+    HasJinaKey: 'settings:has-jina-key',
+    ClearJinaKey: 'settings:clear-jina-key',
     SetDeepPlanModel: 'settings:set-deep-plan-model',
   },
   Projects: {

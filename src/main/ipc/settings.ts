@@ -1,13 +1,13 @@
 import { ipcMain } from 'electron';
 import { IpcChannels } from '@shared/ipc-channels';
 import {
+  clearJinaKey,
   clearOpenRouterKey,
-  clearTavilyKey,
   getSettings,
   setDefaultModel,
   setDeepPlanModel,
+  setJinaKey,
   setOpenRouterKey,
-  setTavilyKey,
 } from '../features/settings';
 
 export function registerSettingsIpc(): void {
@@ -34,19 +34,19 @@ export function registerSettingsIpc(): void {
     await setDefaultModel(model.trim());
   });
 
-  ipcMain.handle(IpcChannels.Settings.SetTavilyKey, async (_event, key: unknown) => {
+  ipcMain.handle(IpcChannels.Settings.SetJinaKey, async (_event, key: unknown) => {
     if (typeof key !== 'string' || key.trim().length === 0) {
-      throw new Error('Tavily API key must be a non-empty string.');
+      throw new Error('Jina API key must be a non-empty string.');
     }
-    await setTavilyKey(key.trim());
+    await setJinaKey(key.trim());
   });
 
-  ipcMain.handle(IpcChannels.Settings.HasTavilyKey, async () => {
+  ipcMain.handle(IpcChannels.Settings.HasJinaKey, async () => {
     const s = await getSettings();
-    return s.hasTavilyKey;
+    return s.hasJinaKey;
   });
 
-  ipcMain.handle(IpcChannels.Settings.ClearTavilyKey, () => clearTavilyKey());
+  ipcMain.handle(IpcChannels.Settings.ClearJinaKey, () => clearJinaKey());
 
   ipcMain.handle(IpcChannels.Settings.SetDeepPlanModel, async (_event, model: unknown) => {
     if (typeof model !== 'string' || model.trim().length === 0) {
