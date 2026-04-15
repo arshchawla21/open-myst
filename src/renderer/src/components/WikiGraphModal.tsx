@@ -25,15 +25,15 @@ interface SimEdge {
   target: string;
 }
 
-const WIDTH = 720;
-const HEIGHT = 520;
+const WIDTH = 820;
+const HEIGHT = 560;
 const CENTER_X = WIDTH / 2;
 const CENTER_Y = HEIGHT / 2;
-const SIM_TICKS = 400;
-const REPULSION = 2600;
-const SPRING = 0.035;
-const SPRING_LENGTH = 130;
-const CENTER_GRAVITY = 0.015;
+const SIM_TICKS = 520;
+const REPULSION = 5200;
+const SPRING = 0.03;
+const SPRING_LENGTH = 190;
+const CENTER_GRAVITY = 0.009;
 const DAMPING = 0.84;
 
 function runSimulation(nodes: SimNode[], edges: SimEdge[]): void {
@@ -92,7 +92,7 @@ function runSimulation(nodes: SimNode[], edges: SimEdge[]): void {
 function seedNodes(graph: WikiGraph): SimNode[] {
   const n = graph.nodes.length;
   if (n === 0) return [];
-  const radius = Math.min(WIDTH, HEIGHT) * 0.28;
+  const radius = Math.min(WIDTH, HEIGHT) * 0.35;
   return graph.nodes.map((node, i) => {
     const angle = (2 * Math.PI * i) / Math.max(n, 1);
     return {

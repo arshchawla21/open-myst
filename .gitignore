@@ -24,3 +24,5 @@ app/dist/
 coverage/
 plan.md
 features.md
+
+.claude
