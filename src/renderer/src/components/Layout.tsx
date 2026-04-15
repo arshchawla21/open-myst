@@ -27,13 +27,13 @@ export function Layout(): JSX.Element {
           {project && <span className="project-name">· {project.name}</span>}
         </div>
         <div className="titlebar-right">
-          <button type="button" className="link" onClick={openDeepSearch}>
+          <button type="button" className="titlebar-btn" onClick={openDeepSearch}>
             Deep Search
           </button>
-          <button type="button" className="link" onClick={openSettings}>
+          <button type="button" className="titlebar-btn" onClick={openSettings}>
             Settings
           </button>
-          <button type="button" className="link" onClick={() => void closeProject()}>
+          <button type="button" className="titlebar-btn" onClick={() => void closeProject()}>
             Close project
           </button>
         </div>
