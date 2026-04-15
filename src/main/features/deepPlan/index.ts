@@ -415,17 +415,6 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
   const key = await requireKey();
   const model = await getDeepPlanModel();
 
-  const priorRounds = session.researchQueries.length > 0;
-  await updateSession((s) =>
-    appendMessage(
-      s,
-      'assistant',
-      priorRounds
-        ? 'Running another round of research…'
-        : 'Researching autonomously — I\'ll add sources as I find them. You can stop me any time, or drop a steering hint to nudge the next queries.',
-      'research-note',
-    ),
-  );
   notifyChanged();
 
   // Seed the dedup set with URLs for every source already in the wiki, so

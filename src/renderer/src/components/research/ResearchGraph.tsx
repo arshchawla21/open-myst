@@ -115,15 +115,15 @@ function truncate(text: string, max: number): string {
 }
 
 function resultColor(status: Node['status']): string {
-  // Two-colour scheme: queries are green, results (whether we're still
-  // checking or already ingested) are blue. Skipped results fade out.
+  // Two shades of dark purple: queries are deeper, results lighter.
+  // Skipped results fade out into the background.
   switch (status) {
     case 'skipped':
-      return 'var(--rg-skipped, #525252)';
+      return 'var(--rg-skipped, #3e3842)';
     case 'ingested':
     case 'pending':
     default:
-      return 'var(--rg-result, #60a5fa)';
+      return 'var(--rg-result, #9a7a95)';
   }
 }
 
@@ -354,21 +354,6 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
 
   return (
     <div className="research-graph">
-      {running && (
-        <div className="research-graph-status">
-          <div className="rg-status-line">
-            <span className="rg-status-label">Researching</span>
-            <span className="generating-dots">
-              <span className="dot" />
-              <span className="dot" />
-              <span className="dot" />
-            </span>
-            <span className="rg-status-phrase">{phrase}</span>
-          </div>
-          <div className="rg-status-sub">This can take a few minutes — keep writing, I'll come find you.</div>
-        </div>
-      )}
-
       {nodes.length <= 1 ? (
         <div className="research-graph-empty">
           {running
@@ -404,7 +389,7 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
               if (n.kind === 'root') {
                 return (
                   <g key={n.id}>
-                    <circle cx={n.x} cy={n.y} r={14} className="rg-root" />
+                    <circle cx={n.x} cy={n.y} r={18} className="rg-root" />
                   </g>
                 );
               }
@@ -424,17 +409,17 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
                     <circle
                       cx={n.x}
                       cy={n.y}
-                      r={active ? 9 : 7}
+                      r={active ? 14 : 11}
                       className="rg-query"
                     />
                     {active && (
                       <text
                         x={n.x}
-                        y={n.y - 14}
+                        y={n.y + 28}
                         textAnchor="middle"
                         className="rg-label rg-label-hover"
                       >
-                        {truncate(n.label, 30)}
+                        {truncate(n.label, 36)}
                       </text>
                     )}
                   </g>
@@ -462,7 +447,7 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
                   <circle
                     cx={n.x}
                     cy={n.y}
-                    r={active ? 6 : 4.5}
+                    r={active ? 10 : 7.5}
                     fill={resultColor(n.status)}
                     className={`rg-result rg-result-${n.status ?? 'pending'}${
                       clickable ? ' rg-result-clickable' : ''
@@ -471,11 +456,11 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
                   {active && (
                     <text
                       x={n.x}
-                      y={n.y - 9}
+                      y={n.y + 22}
                       textAnchor="middle"
                       className="rg-label rg-label-hover"
                     >
-                      {truncate(n.label, 30)}
+                      {truncate(n.label, 36)}
                     </text>
                   )}
                 </g>
@@ -506,6 +491,20 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
           </div>
         )}
       </div>
+
+      {running && (
+        <div className="research-graph-status">
+          <div className="rg-status-line">
+            <span className="rg-status-label">Researching</span>
+            <span className="generating-dots">
+              <span className="dot" />
+              <span className="dot" />
+              <span className="dot" />
+            </span>
+            <span className="rg-status-phrase">{phrase}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
