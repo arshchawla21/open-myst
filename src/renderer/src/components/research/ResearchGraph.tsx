@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { DeepPlanResearchEvent } from '@shared/types';
+import type { DeepPlanResearchEvent, WikiGraph } from '@shared/types';
 import { bridge } from '../../api/bridge';
 import { useSourcePreview } from '../../store/sourcePreview';
 
@@ -29,6 +29,12 @@ interface Node {
   url?: string;
   /** Wiki slug, set once a result is ingested — lets us open its preview. */
   slug?: string;
+  /** True only when the ingestion event belonged to the current run, so
+   *  freshly-added sources can be highlighted distinctly. */
+  freshThisRun?: boolean;
+  /** True when the node came from the pre-existing wiki seed rather than
+   *  a run event, so we know to preserve it across run resets. */
+  fromSeed?: boolean;
   x: number;
   y: number;
   vx: number;
@@ -40,17 +46,18 @@ interface Edge {
   target: string;
 }
 
-const WIDTH = 720;
-const HEIGHT = 420;
+const WIDTH = 860;
+const HEIGHT = 520;
 const CENTER_X = WIDTH / 2;
 const CENTER_Y = HEIGHT / 2;
 
-const REPULSION = 1400;
-const SPRING = 0.06;
-const QUERY_SPRING_LENGTH = 120;
-const RESULT_SPRING_LENGTH = 70;
-const CENTER_GRAVITY = 0.01;
-const DAMPING = 0.82;
+const REPULSION = 2800;
+const SPRING = 0.05;
+const QUERY_SPRING_LENGTH = 150;
+const RESULT_SPRING_LENGTH = 95;
+const SEED_SPRING_LENGTH = 140;
+const CENTER_GRAVITY = 0.008;
+const DAMPING = 0.84;
 
 function step(nodes: Node[], edges: Edge[], byId: Map<string, Node>): void {
   // Repulsion
@@ -73,12 +80,16 @@ function step(nodes: Node[], edges: Edge[], byId: Map<string, Node>): void {
   }
 
   // Springs — query edges are longer than result edges so the graph reads
-  // "hub → sub-hub → leaf" at a glance.
+  // "hub → sub-hub → leaf" at a glance. Wiki-link edges between seeded
+  // sources sit in the middle so the pre-existing constellation spreads.
   for (const e of edges) {
     const a = byId.get(e.source);
     const b = byId.get(e.target);
     if (!a || !b) continue;
-    const target = b.kind === 'result' ? RESULT_SPRING_LENGTH : QUERY_SPRING_LENGTH;
+    let target: number;
+    if (a.kind === 'result' && b.kind === 'result') target = SEED_SPRING_LENGTH;
+    else if (b.kind === 'result') target = RESULT_SPRING_LENGTH;
+    else target = QUERY_SPRING_LENGTH;
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
@@ -168,22 +179,48 @@ interface Props {
   rootLabel: string;
   /** Controls whether the simulation keeps ticking even after the run ends. */
   running: boolean;
+  /**
+   * Optional override for ingested-node clicks. When provided, the graph
+   * calls this with the slug instead of routing through the global source
+   * preview popup — useful for callers that want a side-by-side pane.
+   */
+  onNodeOpen?: (slug: string) => void;
+  /**
+   * Optional pre-existing wiki to seed the graph with. When provided,
+   * those sources appear as plain ingested nodes (no fresh highlight)
+   * and persist across run resets; new run events layer on top.
+   */
+  seedGraph?: WikiGraph | null;
 }
 
-export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Element {
+export function ResearchGraph({
+  events,
+  rootLabel,
+  running,
+  onNodeOpen,
+  seedGraph,
+}: Props): JSX.Element {
   const [, forceRender] = useState(0);
   const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
   const byIdRef = useRef<Map<string, Node>>(new Map());
   const lastEventCountRef = useRef(0);
   const lastMutationRef = useRef<number>(Date.now());
+  // Tracks the runId from the most recent run-start event. Only nodes
+  // whose ingestion event matches this get the "fresh this run" highlight.
+  const currentRunIdRef = useRef<string | null>(null);
   const hoverRef = useRef<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const openPreview = useSourcePreview((s) => s.open);
 
   // Click handler for ingested result nodes — fetches the full SourceMeta
-  // (the graph only carries slug + name) and hands it to the preview popup.
+  // (the graph only carries slug + name) and hands it to the preview popup,
+  // unless the caller wants to own the click (side-by-side pane, etc).
   const openIngestedNode = (slug: string): void => {
+    if (onNodeOpen) {
+      onNodeOpen(slug);
+      return;
+    }
     void bridge.sources.list().then((all) => {
       const full = all.find((s) => s.slug === slug);
       if (full) openPreview(full);
@@ -212,6 +249,54 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
     }
   }, [rootLabel]);
 
+  // Pre-populate the graph with the existing wiki when a seed is provided.
+  // Seeded nodes render as plain ingested sources (no fresh highlight) and
+  // are marked so later run-start events don't wipe them.
+  const hasSeedRef = useRef(false);
+  useEffect(() => {
+    if (!seedGraph) return;
+    const nodes = nodesRef.current;
+    const edges = edgesRef.current;
+    const byId = byIdRef.current;
+
+    // Only apply a seed for slugs we don't already know about — repeat
+    // effect runs (React strict mode, prop identity changes) should be
+    // idempotent.
+    const seedNodeCount = seedGraph.nodes.length;
+    const radius = Math.min(WIDTH, HEIGHT) * 0.38;
+    let added = 0;
+    seedGraph.nodes.forEach((sn, i) => {
+      if (byId.has(sn.id)) return;
+      const angle = (2 * Math.PI * i) / Math.max(seedNodeCount, 1);
+      const n: Node = {
+        id: sn.id,
+        kind: 'result',
+        label: sn.name,
+        parentId: null,
+        status: 'ingested',
+        slug: sn.id,
+        fromSeed: true,
+        freshThisRun: false,
+        x: CENTER_X + Math.cos(angle) * radius + (Math.random() - 0.5) * 20,
+        y: CENTER_Y + Math.sin(angle) * radius + (Math.random() - 0.5) * 20,
+        vx: 0,
+        vy: 0,
+      };
+      nodes.push(n);
+      byId.set(n.id, n);
+      added++;
+    });
+    for (const e of seedGraph.edges) {
+      if (!byId.has(e.source) || !byId.has(e.target)) continue;
+      const exists = edges.some(
+        (x) => x.source === e.source && x.target === e.target,
+      );
+      if (!exists) edges.push({ source: e.source, target: e.target });
+    }
+    hasSeedRef.current = seedGraph.nodes.length > 0;
+    if (added > 0) lastMutationRef.current = Date.now();
+  }, [seedGraph]);
+
   // Feed new events into the node/edge set.
   useEffect(() => {
     const nodes = nodesRef.current;
@@ -223,22 +308,32 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
       const ev = events[i]!;
       switch (ev.kind) {
         case 'run-start': {
-          // Reset the graph when a new run starts.
-          nodes.length = 0;
-          edges.length = 0;
-          byId.clear();
-          const root: Node = {
-            id: '__root__',
-            kind: 'root',
-            label: rootLabel,
-            parentId: null,
-            x: CENTER_X,
-            y: CENTER_Y,
-            vx: 0,
-            vy: 0,
-          };
-          nodes.push(root);
-          byId.set('__root__', root);
+          currentRunIdRef.current = ev.runId;
+          if (hasSeedRef.current) {
+            // Seeded mode: keep the existing constellation, just demote
+            // any prior-run fresh nodes to plain ingested so the new run's
+            // additions are the only ones highlighted.
+            for (const n of nodes) {
+              if (n.freshThisRun) n.freshThisRun = false;
+            }
+          } else {
+            // Legacy reset: wipe everything and re-seed the root only.
+            nodes.length = 0;
+            edges.length = 0;
+            byId.clear();
+            const root: Node = {
+              id: '__root__',
+              kind: 'root',
+              label: rootLabel,
+              parentId: null,
+              x: CENTER_X,
+              y: CENTER_Y,
+              vx: 0,
+              vy: 0,
+            };
+            nodes.push(root);
+            byId.set('__root__', root);
+          }
           break;
         }
         case 'query-start': {
@@ -278,11 +373,35 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
           break;
         }
         case 'result-ingested': {
-          const n = byId.get(ev.resultId);
-          if (!n) break;
-          n.status = 'ingested';
-          n.label = ev.name;
-          n.slug = ev.slug;
+          const transient = byId.get(ev.resultId);
+          // If the wiki already had this source (seeded), merge the
+          // run's transient result into the existing seeded node rather
+          // than duplicating — then mark the seeded one as fresh so the
+          // user sees that THIS run surfaced it again.
+          const existingBySlug = nodes.find(
+            (n) => n.slug === ev.slug && n.id !== ev.resultId,
+          );
+          if (existingBySlug) {
+            existingBySlug.freshThisRun =
+              ev.runId === currentRunIdRef.current;
+            if (transient) {
+              const idx = nodes.indexOf(transient);
+              if (idx >= 0) nodes.splice(idx, 1);
+              byId.delete(transient.id);
+              for (let k = edges.length - 1; k >= 0; k--) {
+                const e2 = edges[k]!;
+                if (e2.source === transient.id || e2.target === transient.id) {
+                  edges.splice(k, 1);
+                }
+              }
+            }
+            break;
+          }
+          if (!transient) break;
+          transient.status = 'ingested';
+          transient.label = ev.name;
+          transient.slug = ev.slug;
+          transient.freshThisRun = ev.runId === currentRunIdRef.current;
           break;
         }
         case 'result-skipped': {
@@ -352,8 +471,33 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
 
   const phrase = phraseFor(activeQuery, phraseSeed);
 
+  // Small "queries / sources" counter pinned to the top-left of the graph.
+  // Counts come straight from the event stream so it stays in sync without
+  // threading status down into this component.
+  let queryCount = 0;
+  let sourceCount = 0;
+  for (const ev of events) {
+    if (ev.kind === 'query-start') queryCount++;
+    else if (ev.kind === 'result-ingested') sourceCount++;
+  }
+
   return (
     <div className="research-graph">
+      {(queryCount > 0 || sourceCount > 0) && (
+        <div className="rg-stats" aria-hidden="true">
+          <span className={`ds-dot${running ? ' ds-dot-running' : ''}`} />
+          <div className="rg-stats-values">
+            <div className="rg-stats-row">
+              <span className="rg-stats-num">{queryCount}</span>
+              <span className="rg-stats-label">queries</span>
+            </div>
+            <div className="rg-stats-row">
+              <span className="rg-stats-num">{sourceCount}</span>
+              <span className="rg-stats-label">sources</span>
+            </div>
+          </div>
+        </div>
+      )}
       {nodes.length <= 1 ? (
         <div className="research-graph-empty">
           {running
@@ -416,6 +560,7 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
                 );
               }
               const clickable = n.status === 'ingested' && !!n.slug;
+              const fresh = clickable && n.freshThisRun === true;
               return (
                 <g
                   key={n.id}
@@ -441,7 +586,7 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
                     fill={resultColor(n.status)}
                     className={`rg-result rg-result-${n.status ?? 'pending'}${
                       clickable ? ' rg-result-clickable' : ''
-                    }`}
+                    }${fresh ? ' rg-result-fresh' : ''}`}
                   />
                 </g>
               );
@@ -453,16 +598,19 @@ export function ResearchGraph({ events, rootLabel, running }: Props): JSX.Elemen
       <div className="research-graph-tooltip">
         {hovered ? (
           <>
-            <div className="rg-tooltip-kind">
-              {hovered.kind === 'query'
-                ? 'Query'
-                : hovered.status === 'ingested'
-                  ? 'Ingested'
-                  : hovered.status === 'skipped'
-                    ? `Skipped (${hovered.skipReason ?? '?'})`
-                    : 'Checking'}
+            <div className="rg-tooltip-headline">
+              <span className="rg-tooltip-kind">
+                {hovered.kind === 'query'
+                  ? 'QUERY'
+                  : hovered.status === 'ingested'
+                    ? 'INGESTED'
+                    : hovered.status === 'skipped'
+                      ? `SKIPPED (${hovered.skipReason ?? '?'})`
+                      : 'CHECKING'}
+              </span>
+              <span className="rg-tooltip-sep">—</span>
+              <span className="rg-tooltip-label">{truncate(hovered.label, 120)}</span>
             </div>
-            <div className="rg-tooltip-label">{truncate(hovered.label, 140)}</div>
             {hovered.url && <div className="rg-tooltip-url">{hovered.url}</div>}
           </>
         ) : (

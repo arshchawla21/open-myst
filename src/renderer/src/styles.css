@@ -2796,9 +2796,10 @@ h3 {
 .research-graph {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   min-height: 0;
   flex: 1;
+  position: relative;
   /* Two shades of dark purple — queries sit deeper, results read as
      a lighter dusty plum so the hub/leaf distinction is still legible. */
   --rg-query: #6b4a7a;
@@ -2809,7 +2810,8 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 2px 2px 6px;
+  padding: 0 2px 4px;
+  margin-top: -2px;
 }
 .rg-status-line {
   display: flex;
@@ -2838,6 +2840,51 @@ h3 {
   font-size: 13px;
   font-style: italic;
 }
+/* Tiny queries/sources tally pinned to the top-left of the graph.
+ * Green left accent bar + two stacked rows; intentionally small so it
+ * reads as chrome, not content. */
+.rg-stats {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 11px 6px 10px;
+  background: rgba(20, 18, 24, 0.72);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+  z-index: 2;
+}
+.rg-stats .ds-dot {
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.55);
+}
+.rg-stats-values {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.15;
+}
+.rg-stats-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 11px;
+}
+.rg-stats-num {
+  color: var(--fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.rg-stats-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9.5px;
+}
 .research-graph-svg {
   width: 100%;
   flex: 1;
@@ -2862,12 +2909,26 @@ h3 {
   cursor: pointer;
 }
 .rg-result {
-  stroke: rgba(255, 255, 255, 0.2);
+  stroke: none;
+}
+/* Pending ("checking…") results carry a faint outline so they're
+ * distinguishable from fully-ingested discs while still looking muted. */
+.rg-result-pending {
+  stroke: rgba(255, 255, 255, 0.22);
   stroke-width: 1;
 }
-.rg-result-clickable {
-  stroke: rgba(255, 255, 255, 0.9);
-  stroke-width: 1.5;
+/* Ingested nodes (both seeded and run-added) are plain purple discs —
+ * no outline — so the graph reads as a field of sources by default. */
+.rg-result-ingested {
+  stroke: none;
+}
+/* Fresh-this-run ingestions get a bold white outline + soft glow so
+ * the user can instantly see what the current run just added on top
+ * of the pre-existing wiki. */
+.rg-result-fresh {
+  stroke: #ffffff;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.55));
 }
 .rg-result-skipped {
   opacity: 0.55;
@@ -2889,24 +2950,35 @@ h3 {
 .research-graph-tooltip {
   font-size: 12px;
   color: var(--muted);
-  min-height: 56px;
-  padding: 4px 2px;
+  min-height: 34px;
+  padding: 2px 2px 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+}
+.rg-tooltip-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  line-height: 1.3;
 }
 .rg-tooltip-kind {
   color: var(--fg);
   font-weight: 600;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+.rg-tooltip-sep {
+  color: var(--muted);
+  flex-shrink: 0;
 }
 .rg-tooltip-label {
   color: var(--fg);
   font-size: 12px;
-  line-height: 1.35;
   overflow-wrap: anywhere;
+  min-width: 0;
 }
 .rg-tooltip-url {
   font-family: var(--font-mono, monospace);
@@ -2922,6 +2994,74 @@ h3 {
 .ds-modal {
   max-width: 680px;
   width: 82vw;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  transition: max-width 220ms var(--ease), width 220ms var(--ease);
+}
+.ds-modal-main {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 22px 26px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.ds-modal-with-preview {
+  max-width: 1120px;
+  width: 94vw;
+}
+.ds-modal-preview {
+  flex: 0 0 420px;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel-2, var(--bg-panel));
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  overflow: hidden;
+  animation: ds-preview-in 220ms var(--ease);
+}
+@keyframes ds-preview-in {
+  from { opacity: 0; transform: translateX(10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.ds-modal-preview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 22px 22px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.ds-modal-preview-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.ds-modal-preview-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 22px 20px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg);
+}
+.ds-modal-preview-path {
+  padding: 8px 22px 14px;
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+  border-top: 1px solid var(--border);
+}
+.ds-modal .modal-header {
+  align-items: flex-start;
 }
 .ds-modal-sub {
   margin-top: 4px;
@@ -2991,6 +3131,12 @@ h3 {
 }
 .ds-graph-section {
   padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  min-height: 440px;
+}
+.ds-graph-section .research-graph-svg {
+  min-height: 380px;
 }
 .ds-hints-list {
   display: flex;
