@@ -2,7 +2,9 @@ import type {
   AppSettings,
   ChatMessage,
   Comment,
+  DeepPlanResearchEvent,
   DeepPlanStatus,
+  DeepSearchStatus,
   DocumentFile,
   PendingEdit,
   ProjectMeta,
@@ -18,9 +20,9 @@ export interface MystApi {
     hasOpenRouterKey: () => Promise<boolean>;
     clearOpenRouterKey: () => Promise<void>;
     setDefaultModel: (model: string) => Promise<void>;
-    setTavilyKey: (key: string) => Promise<void>;
-    hasTavilyKey: () => Promise<boolean>;
-    clearTavilyKey: () => Promise<void>;
+    setJinaKey: (key: string) => Promise<void>;
+    hasJinaKey: () => Promise<boolean>;
+    clearJinaKey: () => Promise<void>;
     setDeepPlanModel: (model: string) => Promise<void>;
   };
   projects: {
@@ -87,11 +89,21 @@ export interface MystApi {
     sendMessage: (message: string) => Promise<DeepPlanStatus>;
     advance: () => Promise<DeepPlanStatus>;
     runResearch: () => Promise<DeepPlanStatus>;
+    stopResearch: () => Promise<DeepPlanStatus>;
+    addResearchHint: (hint: string) => Promise<DeepPlanStatus>;
     skip: () => Promise<DeepPlanStatus>;
     oneShot: () => Promise<DeepPlanStatus>;
     reset: () => Promise<DeepPlanStatus>;
     onChanged: (callback: () => void) => () => void;
     onChunk: (callback: (chunk: string) => void) => () => void;
     onChunkDone: (callback: () => void) => () => void;
+    onResearchEvent: (callback: (event: DeepPlanResearchEvent) => void) => () => void;
+  };
+  deepSearch: {
+    status: () => Promise<DeepSearchStatus>;
+    start: (task: string) => Promise<DeepSearchStatus>;
+    stop: () => Promise<DeepSearchStatus>;
+    addHint: (hint: string) => Promise<DeepSearchStatus>;
+    onChanged: (callback: () => void) => () => void;
   };
 }

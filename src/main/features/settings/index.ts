@@ -18,7 +18,7 @@ interface StoredSettings {
   defaultModel: string;
   deepPlanModel: string;
   openRouterKeyCipher: string | null;
-  tavilyKeyCipher: string | null;
+  jinaKeyCipher: string | null;
   recentProjects: string[];
 }
 
@@ -26,7 +26,7 @@ const DEFAULTS: StoredSettings = {
   defaultModel: DEFAULT_MODEL,
   deepPlanModel: DEFAULT_DEEP_PLAN_MODEL,
   openRouterKeyCipher: null,
-  tavilyKeyCipher: null,
+  jinaKeyCipher: null,
   recentProjects: [],
 };
 
@@ -59,7 +59,7 @@ export async function getSettings(): Promise<AppSettings> {
     defaultModel: stored.defaultModel,
     deepPlanModel: stored.deepPlanModel,
     hasOpenRouterKey: stored.openRouterKeyCipher !== null,
-    hasTavilyKey: stored.tavilyKeyCipher !== null,
+    hasJinaKey: stored.jinaKeyCipher !== null,
     recentProjects: stored.recentProjects,
   };
 }
@@ -91,26 +91,26 @@ export async function setDefaultModel(model: string): Promise<void> {
   await writeStored({ ...stored, defaultModel: model });
 }
 
-export async function setTavilyKey(key: string): Promise<void> {
+export async function setJinaKey(key: string): Promise<void> {
   if (!safeStorage.isEncryptionAvailable()) {
     throw new Error('OS keychain is not available; cannot store API key securely.');
   }
   const stored = await readStored();
   const cipher = safeStorage.encryptString(key).toString('base64');
-  await writeStored({ ...stored, tavilyKeyCipher: cipher });
+  await writeStored({ ...stored, jinaKeyCipher: cipher });
 }
 
-export async function getTavilyKey(): Promise<string | null> {
+export async function getJinaKey(): Promise<string | null> {
   const stored = await readStored();
-  if (!stored.tavilyKeyCipher) return null;
+  if (!stored.jinaKeyCipher) return null;
   if (!safeStorage.isEncryptionAvailable()) return null;
-  const buf = Buffer.from(stored.tavilyKeyCipher, 'base64');
+  const buf = Buffer.from(stored.jinaKeyCipher, 'base64');
   return safeStorage.decryptString(buf);
 }
 
-export async function clearTavilyKey(): Promise<void> {
+export async function clearJinaKey(): Promise<void> {
   const stored = await readStored();
-  await writeStored({ ...stored, tavilyKeyCipher: null });
+  await writeStored({ ...stored, jinaKeyCipher: null });
 }
 
 export async function setDeepPlanModel(model: string): Promise<void> {

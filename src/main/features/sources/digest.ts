@@ -34,7 +34,12 @@ export interface SourceDigest {
   anchors: SourceAnchor[];
 }
 
-const MAX_PREVIEW_CHARS = 6000;
+// Raw text cap the digest LLM sees. 24k chars ≈ 6k tokens, or ~5 pages of
+// prose — enough to cover abstract + intro + most sections of a long paper,
+// while staying well under any reasonable model's context budget. The old
+// 6k cap was hitting the "shadow of the source" problem for any PDF longer
+// than ~2 pages: the LLM summary would only reflect the abstract and TOC.
+const MAX_PREVIEW_CHARS = 24000;
 
 const SYSTEM_PROMPT = `You process source material into a research wiki entry. Given raw text from a source, output ONLY valid JSON with these fields:
 

@@ -6,7 +6,7 @@ import { BugReportModal } from './BugReportModal';
 export function SettingsModal(): JSX.Element {
   const { settings, closeSettings, refreshSettings } = useApp();
   const [key, setKey] = useState('');
-  const [tavilyKey, setTavilyKey] = useState('');
+  const [jinaKey, setJinaKey] = useState('');
   const [model, setModel] = useState(settings?.defaultModel ?? '');
   const [deepPlanModel, setDeepPlanModel] = useState(settings?.deepPlanModel ?? '');
   const [saving, setSaving] = useState(false);
@@ -57,12 +57,12 @@ export function SettingsModal(): JSX.Element {
     }
   };
 
-  const saveTavilyKey = async (): Promise<void> => {
+  const saveJinaKey = async (): Promise<void> => {
     setLocalError(null);
     setSaving(true);
     try {
-      await bridge.settings.setTavilyKey(tavilyKey);
-      setTavilyKey('');
+      await bridge.settings.setJinaKey(jinaKey);
+      setJinaKey('');
       await refreshSettings();
     } catch (err) {
       setLocalError((err as Error).message);
@@ -71,10 +71,10 @@ export function SettingsModal(): JSX.Element {
     }
   };
 
-  const clearTavilyKey = async (): Promise<void> => {
+  const clearJinaKey = async (): Promise<void> => {
     setSaving(true);
     try {
-      await bridge.settings.clearTavilyKey();
+      await bridge.settings.clearJinaKey();
       await refreshSettings();
     } finally {
       setSaving(false);
@@ -153,15 +153,15 @@ export function SettingsModal(): JSX.Element {
         </section>
 
         <section className="modal-section">
-          <h3>Tavily API key</h3>
+          <h3>Jina API key</h3>
           <p className="muted">
-            Used by Deep Plan's research loop to search the web. Stored encrypted via your OS keychain.
-            Get a key at tavily.com.
+            Used by Deep Plan's research loop to search the web and scrape pages in one call.
+            Stored encrypted via your OS keychain. Get a key at jina.ai.
           </p>
-          {settings?.hasTavilyKey ? (
+          {settings?.hasJinaKey ? (
             <div className="row">
               <span className="status-ok">Key is set</span>
-              <button type="button" onClick={() => void clearTavilyKey()} disabled={saving}>
+              <button type="button" onClick={() => void clearJinaKey()} disabled={saving}>
                 Clear key
               </button>
             </div>
@@ -169,15 +169,15 @@ export function SettingsModal(): JSX.Element {
             <div className="row">
               <input
                 type="password"
-                placeholder="tvly-..."
-                value={tavilyKey}
-                onChange={(e) => setTavilyKey(e.target.value)}
+                placeholder="jina_..."
+                value={jinaKey}
+                onChange={(e) => setJinaKey(e.target.value)}
               />
               <button
                 type="button"
                 className="primary"
-                onClick={() => void saveTavilyKey()}
-                disabled={saving || tavilyKey.trim().length === 0}
+                onClick={() => void saveJinaKey()}
+                disabled={saving || jinaKey.trim().length === 0}
               >
                 Save key
               </button>

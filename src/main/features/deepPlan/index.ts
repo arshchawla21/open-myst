@@ -9,11 +9,11 @@ import type {
 } from '@shared/types';
 import { broadcast, log, logError } from '../../platform';
 import { streamChat, completeText, type LlmMessage } from '../../llm';
-import { getOpenRouterKey, getDeepPlanModel, getTavilyKey } from '../settings';
-import { ingestText, listSources } from '../sources';
+import { getOpenRouterKey, getDeepPlanModel, getJinaKey } from '../settings';
+import { listSources } from '../sources';
 import { listDocuments, writeDocument } from '../documents';
 import {
-  buildStatus,
+  buildStatus as buildStatusBase,
   clearAutoStart,
   createSession,
   deleteSession,
@@ -32,8 +32,8 @@ import {
   scopingPrompt,
   sourcesPrompt,
 } from './prompts';
-import { applyRubricPatch, parsePlannerReply, type ResearchQueryProposal } from './parse';
-import { tavilySearch, type TavilyResult } from './tavily';
+import { applyRubricPatch, parsePlannerReply } from './parse';
+import { runResearchEngine } from '../research/engine';
 import {
   formatLookupReply,
   parseSourceLookups,
@@ -41,24 +41,23 @@ import {
 } from '../sources/sourceLookup';
 
 const MAX_LOOKUP_ROUNDS = 3;
-const MAX_RESEARCH_ROUNDS = 1;
-const MAX_QUERIES_PER_ROUND = 5;
 
 /**
- * Normalize a URL for dedup comparisons. Strips trailing slash, fragment, and
- * lowercases the host. Good enough to catch "same page, different casing" and
- * "…/foo vs …/foo/" collisions that Tavily routinely hands back.
+ * Cancellation flag for the currently running research loop. Flipped by
+ * `stopResearch()` and checked between queries inside the engine. We keep
+ * it module-level rather than per-session because there's only ever one
+ * Deep Plan session at a time, and the engine reads it via a closure.
  */
-function canonicalUrl(raw: string): string {
-  try {
-    const u = new URL(raw);
-    u.hash = '';
-    let path = u.pathname.replace(/\/+$/, '');
-    if (path === '') path = '/';
-    return `${u.protocol}//${u.host.toLowerCase()}${path}${u.search}`;
-  } catch {
-    return raw.trim().toLowerCase();
-  }
+let researchCancelled = false;
+let researchRunning = false;
+
+/**
+ * Wrapper around the state-level buildStatus so every caller automatically
+ * sees the current running flag without having to thread it through. IPC
+ * handlers (including the renderer's Status call) end up here.
+ */
+export function buildStatus(): Promise<DeepPlanStatus> {
+  return buildStatusBase(researchRunning);
 }
 
 async function streamWithLookupResolution(
@@ -106,7 +105,7 @@ async function streamWithLookupResolution(
  *     streams via broadcast(Chunk), stores both messages, applies rubric
  *     patches, returns the updated status.
  *   - runResearchLoop: triggered from stage 4 → asks planner for queries,
- *     runs Tavily, ingests winning results as sources, updates counters.
+ *     runs Jina search, ingests winning results as sources, updates counters.
  *   - runOneShot: triggered from stage 7 → calls the generator model once
  *     with the full rubric + wiki, writes the draft into the active
  *     document, marks the session complete.
@@ -116,7 +115,6 @@ async function streamWithLookupResolution(
  */
 
 export {
-  buildStatus,
   markAutoStart,
   clearAutoStart,
   shouldAutoStart,
@@ -356,6 +354,39 @@ async function primeStage(stage: DeepPlanStage): Promise<void> {
   notifyChanged();
 }
 
+export function isResearchRunning(): boolean {
+  return researchRunning;
+}
+
+export function stopResearch(): void {
+  if (!researchRunning) return;
+  log('deep-plan', 'research.stop.requested', {});
+  researchCancelled = true;
+  notifyChanged();
+}
+
+export async function addResearchHint(hint: string): Promise<DeepPlanStatus> {
+  const trimmed = hint.trim();
+  if (!trimmed) return buildStatus();
+  await updateSession((s) => ({
+    ...s,
+    researchHints: [...s.researchHints, trimmed],
+    messages: [
+      ...s.messages,
+      {
+        id: randomUUID(),
+        role: 'user',
+        content: `Steering hint: ${trimmed}`,
+        kind: 'research-note',
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  }));
+  // The engine picks up hints on its next planner call via getHints().
+  notifyChanged();
+  return buildStatus();
+}
+
 export async function runResearchLoop(): Promise<DeepPlanStatus> {
   const session = await readSession();
   if (!session) throw new Error('No Deep Plan session is active.');
@@ -363,14 +394,18 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
     log('deep-plan', 'research.skipNotInStage', { stage: session.stage });
     return buildStatus();
   }
+  if (researchRunning) {
+    log('deep-plan', 'research.alreadyRunning', {});
+    return buildStatus();
+  }
 
-  const tavilyKey = await getTavilyKey();
-  if (!tavilyKey) {
+  const jinaKey = await getJinaKey();
+  if (!jinaKey) {
     await updateSession((s) =>
       appendMessage(
         s,
         'assistant',
-        'I need a Tavily API key to run autonomous research. Open Settings and add one, then hit Continue again. You can also hit Continue without it to skip ahead.',
+        'I need a Jina API key to run autonomous research. Open Settings and add one, then hit Continue again. You can also hit Continue without it to skip ahead.',
       ),
     );
     notifyChanged();
@@ -387,7 +422,7 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
       'assistant',
       priorRounds
         ? 'Running another round of research…'
-        : 'Running a round of autonomous research — this takes a minute or two.',
+        : 'Researching autonomously — I\'ll add sources as I find them. You can stop me any time, or drop a steering hint to nudge the next queries.',
       'research-note',
     ),
   );
@@ -395,126 +430,132 @@ export async function runResearchLoop(): Promise<DeepPlanStatus> {
 
   // Seed the dedup set with URLs for every source already in the wiki, so
   // re-runs don't re-ingest the same page the planner happens to surface
-  // again. The set is mutated as new sources land within this loop.
+  // again. The engine mutates it as new sources land.
   const seenUrls = new Set<string>();
   {
     const existing = await listSources();
     for (const src of existing) {
-      if (src.sourcePath) seenUrls.add(canonicalUrl(src.sourcePath));
+      if (src.sourcePath) {
+        try {
+          const u = new URL(src.sourcePath);
+          u.hash = '';
+          let path = u.pathname.replace(/\/+$/, '');
+          if (path === '') path = '/';
+          seenUrls.add(`${u.protocol}//${u.host.toLowerCase()}${path}${u.search}`);
+        } catch {
+          seenUrls.add(src.sourcePath.trim().toLowerCase());
+        }
+      }
     }
   }
 
-  let tokensThisLoop = 0;
-  let converged = false;
-
-  for (let round = 0; round < MAX_RESEARCH_ROUNDS; round++) {
-    const current = await readSession();
-    if (!current) break;
-    const sources = await listSources();
-    const plannerSystem = researchPlannerPrompt(current, sources);
-    const plannerMessages: LlmMessage[] = [
-      { role: 'system', content: plannerSystem },
-      { role: 'user', content: 'Propose the next queries now.' },
-    ];
-
-    const rawPlan = await completeText({
-      apiKey: key,
-      model,
-      messages: plannerMessages,
-      logScope: 'deep-plan',
-    });
-    if (rawPlan === null) {
-      log('deep-plan', 'research.planner.nullReply', { round });
-      break;
-    }
-    tokensThisLoop += estimateTokensK(plannerSystem.length + rawPlan.length);
-
-    const parsed = parsePlannerReply(rawPlan);
-    const plan = parsed.researchPlan ?? [];
-    log('deep-plan', 'research.planned', { round, count: plan.length });
-
-    if (plan.length === 0) {
-      converged = true;
-      break;
-    }
-
-    for (const proposal of plan.slice(0, MAX_QUERIES_PER_ROUND)) {
-      const ingested = await runOneQuery(proposal, tavilyKey, seenUrls);
-      tokensThisLoop += estimateTokensK(
-        ingested.reduce((sum, r) => sum + r.content.length + (r.rawContent?.length ?? 0), 0),
-      );
-      await updateSession((s) => {
-        const record = {
-          query: proposal.query,
-          rationale: proposal.rationale,
-          resultsSeen: ingested.length,
-          ingestedSlugs: ingested.map((r) => r.url),
-          timestamp: new Date().toISOString(),
-        };
-        const note = `Searched **${proposal.query}** — added ${ingested.length} source${
-          ingested.length === 1 ? '' : 's'
-        } to the wiki.${
-          proposal.rationale ? `\n\n_Why:_ ${proposal.rationale}` : ''
-        }`;
-        return {
-          ...s,
-          researchQueries: [...s.researchQueries, record],
-          messages: [
-            ...s.messages,
-            {
-              id: randomUUID(),
-              role: 'assistant',
-              content: note,
-              kind: 'research-note',
-              timestamp: new Date().toISOString(),
-            },
-          ],
-        };
-      });
-      notifyChanged();
-    }
-  }
-
-  const summary = converged
-    ? 'Coverage looks good — hit Continue to move on, or "Keep researching" if you want more.'
-    : 'Round done. Hit Continue to move on, or "Keep researching" if you want another pass.';
-  await updateSession((s) => ({
-    ...appendMessage(s, 'assistant', summary, 'research-note'),
-    tokensUsedK: s.tokensUsedK + tokensThisLoop,
-  }));
+  researchCancelled = false;
+  researchRunning = true;
   notifyChanged();
+  let tokensThisLoop = 0;
+  const runId = randomUUID();
+
+  try {
+    const result = await runResearchEngine(
+      {
+        runId,
+        source: 'deepPlan',
+        jinaKey,
+        getHints: () => {
+          // Read fresh from disk so hints added while the loop is running
+          // get picked up on the next planner call.
+          return (session.researchHints ?? []).slice();
+        },
+        isCancelled: () => researchCancelled,
+        getNextPlan: async (hints) => {
+          const current = await readSession();
+          if (!current) return null;
+          const sources = await listSources();
+          // Pull latest hints from disk each round so mid-run additions land.
+          const latestHints = current.researchHints ?? hints;
+          const plannerSystem = researchPlannerPrompt(current, sources, latestHints);
+          const rawPlan = await completeText({
+            apiKey: key,
+            model,
+            messages: [
+              { role: 'system', content: plannerSystem },
+              { role: 'user', content: 'Propose the next queries now.' },
+            ],
+            logScope: 'deep-plan',
+          });
+          if (rawPlan === null) {
+            log('deep-plan', 'research.planner.nullReply', {});
+            return null;
+          }
+          tokensThisLoop += estimateTokensK(plannerSystem.length + rawPlan.length);
+          return parsePlannerReply(rawPlan).researchPlan ?? [];
+        },
+        onQueryStart: async () => {
+          // Per-query chat notes are intentionally suppressed — the live
+          // status bar + research graph already show what the agent is
+          // doing, so echoing it into the chat log was just noise.
+        },
+        onQueryComplete: async (proposal, _queryId, ingested) => {
+          tokensThisLoop += estimateTokensK(
+            ingested.reduce(
+              (sum, r) => sum + r.content.length + (r.rawContent?.length ?? 0),
+              0,
+            ),
+          );
+          await updateSession((s) => {
+            const record = {
+              query: proposal.query,
+              rationale: proposal.rationale,
+              resultsSeen: ingested.length,
+              ingestedSlugs: ingested.map((r) => r.url),
+              timestamp: new Date().toISOString(),
+            };
+            return {
+              ...s,
+              researchQueries: [...s.researchQueries, record],
+            };
+          });
+          notifyChanged();
+        },
+      },
+      seenUrls,
+    );
+
+    const summary = summariseRunResult(result);
+    await updateSession((s) => ({
+      ...appendMessage(s, 'assistant', summary, 'research-note'),
+      tokensUsedK: s.tokensUsedK + tokensThisLoop,
+    }));
+  } finally {
+    researchRunning = false;
+    researchCancelled = false;
+    notifyChanged();
+  }
 
   return buildStatus();
 }
 
-async function runOneQuery(
-  proposal: ResearchQueryProposal,
-  tavilyKey: string,
-  seenUrls: Set<string>,
-): Promise<TavilyResult[]> {
-  const resp = await tavilySearch({ apiKey: tavilyKey, query: proposal.query, maxResults: 4 });
-  if (!resp || resp.results.length === 0) return [];
-
-  const ingested: TavilyResult[] = [];
-  for (const result of resp.results) {
-    if (ingested.length >= 3) break;
-    const canonical = canonicalUrl(result.url);
-    if (seenUrls.has(canonical)) {
-      log('deep-plan', 'research.dedupSkip', { url: result.url });
-      continue;
-    }
-    const body = result.rawContent || result.content;
-    if (!body || body.length < 200) continue;
-    try {
-      const title = `${result.title} (${new URL(result.url).hostname})`;
-      await ingestText(`Source URL: ${result.url}\n\n${body}`, title);
-      seenUrls.add(canonical);
-      ingested.push(result);
-    } catch (err) {
-      logError('deep-plan', 'research.ingestFailed', err, { url: result.url });
-    }
+function summariseRunResult(result: {
+  totalIngested: number;
+  totalQueries: number;
+  reason: 'target-reached' | 'converged' | 'cancelled' | 'query-cap' | 'error';
+}): string {
+  const counts = `${result.totalIngested} source${
+    result.totalIngested === 1 ? '' : 's'
+  } added across ${result.totalQueries} queries`;
+  switch (result.reason) {
+    case 'target-reached':
+      return `Coverage looks good — ${counts}. Hit Continue to move on, or "Keep researching" if you want more.`;
+    case 'converged':
+      return `The planner thinks the wiki is covered — ${counts}. Hit Continue to move on, or "Keep researching" to push further.`;
+    case 'cancelled':
+      return `Stopped early — ${counts}. Hit Continue to move on, or "Keep researching" to resume.`;
+    case 'query-cap':
+      return `Hit the query cap — ${counts}. Hit Continue to move on, or "Keep researching" for another pass.`;
+    case 'error':
+    default:
+      return `Research stopped with an error — ${counts}. Hit Continue to move on, or "Keep researching" to retry.`;
   }
-  return ingested;
 }
 
 export async function skipSession(): Promise<DeepPlanStatus> {
